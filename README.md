@@ -1,15 +1,20 @@
-# CorreoPlus V0.5 — credenciales cifradas (versión de prueba)
+# CorreoPlus V0.6 — avance de desarrollo
 
-Base V0.4, con diseño y caché existentes. Añade guardado **opcional** de la contraseña IMAP/SMTP mediante AES-GCM y clave no exportable de Android Keystore. Al abrir, si hay contraseña guardada, recupera los ajustes IMAP/SMTP y sincroniza. También permite eliminar la contraseña guardada.
+Esta es una versión **preview**, NO la V0.6 completa prometida.
 
-## Limitaciones importantes
+## Añadido
+- Favoritos locales por cuenta, carpeta y UID; accesibles desde la pantalla del mensaje.
+- Búsqueda offline también en el cuerpo de los mensajes que ya estén descargados.
+- Indicador de favorito en los resultados.
+- Conserva la base de V0.5 y su caché.
 
-- Esta versión mantiene **una cuenta activa**. No incluye todavía bandeja multicuenta ni OAuth2 para Gmail/Outlook.
-- No incorpora adjuntos ni notificaciones; la sincronización sigue examinando hasta 100 mensajes recientes, no es una implementación IMAP QRESYNC completa.
-- La **caché SQLite no está cifrada**. Las contraseñas sí se cifran si activas la opción.
-- No se ha podido ejecutar una compilación Android ni pruebas en dispositivo aquí. Conserva V0.4 hasta confirmar la compilación y la actualización.
-- En la primera ejecución de V0.5 introduce la contraseña y marca la casilla si deseas recordarla. Si la clave de Keystore deja de estar disponible, vuelve a introducirla.
+## Todavía NO implementado
+- Varias cuentas simultáneas y bandeja unificada.
+- Adjuntos y envío de archivos.
+- Notificaciones y sincronización periódica con WorkManager.
+- Mover, borrar o archivar mensajes en el servidor.
+- Biometría, gestos y modo oscuro.
+- OAuth2 Gmail/Outlook.
 
-## Instalación
-
-Sube el contenido del proyecto al repositorio CorreoPlus (incluida `.github`), commit/push a `main`, y comprueba GitHub Actions. Instala el APK sobre V0.4, sin desinstalar, para preservar la caché.
+## Seguridad y verificación
+No se ha compilado en Android ni probado en un dispositivo. No sustituir la V0.5 estable sin copia de respaldo. La marca de favoritos es local, no sincronizada con el servidor. El esquema de caché no se modifica.

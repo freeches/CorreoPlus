@@ -52,7 +52,7 @@ public final class MailCache extends SQLiteOpenHelper {
     public synchronized ArrayList<Item> search(String account,String folder,String query){
         ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);
         String term="%"+query.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body FROM messages WHERE account=? AND folder=? AND validity=? AND (sender LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\') ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val),term,term})){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body FROM messages WHERE account=? AND folder=? AND validity=? AND (sender LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\') ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val),term,term,term})){
             while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5)));
         }
         return out;

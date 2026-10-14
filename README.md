@@ -1,22 +1,19 @@
-# CorreoPlus V0.2 — prototipo Outlook-inspired
+# CorreoPlus V0.3 — caché local experimental
 
-## Incluido
-- Bandeja con hasta 30 mensajes por página, remitente, asunto, fecha y estado leído.
-- Lectura de mensajes de texto y conversión simple de HTML a texto.
-- Decodificación MIME de encabezados.
-- Navegación por carpetas IMAP disponibles.
-- Respuesta, reenvío y composición básica.
-- IMAP 993 TLS directo o 143 STARTTLS obligatorio.
-- SMTP 465 TLS directo o 587 STARTTLS obligatorio.
-- Diseño de navegación azul inspirado en Outlook (no es una copia de Microsoft).
+## Cambios
+- Guarda cabeceras en SQLite por cuenta, carpeta, UIDVALIDITY y UID.
+- Muestra al abrir la app los últimos mensajes previamente sincronizados, sin esperar a IMAP.
+- Sincroniza los 50 últimos encabezados al conectar y descarga contenido de hasta 20 mensajes recientes para lectura sin conexión.
+- No elimina cuerpos ya guardados al refrescar los encabezados.
+- Permite volver a descargar el cuerpo de un mensaje al abrirlo.
 
 ## Limitaciones importantes
-- Una cuenta por sesión. No almacena credenciales; vuelve a introducirlas al reiniciar.
-- No incluye OAuth2 Gmail/Outlook, adjuntos, notificaciones, búsqueda, paginación completa ni borradores.
-- Las respuestas y reenvíos no preservan adjuntos ni cabeceras de hilo.
-- No admite contraseña SMTP distinta de la contraseña IMAP.
-- Solo se ha verificado estructura del proyecto; la compilación en GitHub Actions y pruebas en dispositivo están pendientes.
-- No usar como cliente de correo principal todavía. Evita introducir credenciales de cuentas sensibles hasta realizar auditoría de seguridad.
+- La contraseña NO se almacena: después de cerrar completamente la aplicación es necesario volver a introducir los datos de conexión para sincronizar o enviar. La bandeja en caché sí se puede consultar sin conexión.
+- La caché SQLite es privada de la aplicación, pero **no está cifrada**. No usar en un dispositivo compartido o comprometido.
+- No sincroniza eliminaciones remotas ni carpetas completas, y no ejecuta tareas periódicas en segundo plano.
+- Los cuerpos de mensajes solo se guardan para los 20 recientes o los abiertos con conexión. No incluye adjuntos offline.
+- OAuth2 Gmail/Outlook aún no está implementado.
+- No se ha validado la compilación en GitHub Actions ni probado en un teléfono; se entrega como versión de prueba.
 
 ## Instalación
-Subir el contenido del ZIP (incluida la carpeta oculta `.github`) al repositorio. Commit en main y consultar GitHub Actions. El flujo genera un APK de depuración cuando la compilación funciona.
+Sustituir los archivos del proyecto en GitHub/MGit, commit y push a main; comprobar Actions y descargar APK si compila correctamente.

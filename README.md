@@ -21,3 +21,14 @@ No se ha compilado ni probado en Android. Mantén la V0.6.1 instalada hasta obte
 - Ante fallo temporal persistente se conserva y muestra la caché sin diálogo modal.
 - No incluye aún adjuntos ni notificaciones.
 - La compilación y la prueba real con el servidor deben verificarse en GitHub Actions y Android.
+
+
+## V0.7.2 — estabilidad IMAP
+- Hasta 3 intentos de sincronización con pausas de 1,5 y 3 segundos.
+- Cada intento crea una conexión IMAP nueva; no se reutiliza la anterior.
+- Reconocimiento de errores transitorios de red y servidor.
+- Evita sincronizaciones simultáneas desde la interfaz.
+- Solo muestra un aviso no bloqueante después de agotar los intentos.
+- No borra los correos almacenados ni cambia las credenciales.
+
+Nota: no se ha verificado la compilación Android en este entorno; comprobar GitHub Actions antes de instalar.

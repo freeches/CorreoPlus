@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
   String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX"; int inboxFilter=0;
   final int navy=Color.rgb(17,43,74), blue=Color.rgb(0,105,185);
   boolean darkMode=false;
+  final java.util.concurrent.atomic.AtomicBoolean syncing=new java.util.concurrent.atomic.AtomicBoolean(false);
   int foreground(){return darkMode?Color.WHITE:navy;}
   int background(){return darkMode?Color.rgb(24,30,39):Color.WHITE;}
   interface Task { void run() throws Exception; }
@@ -72,12 +73,21 @@ public class MainActivity extends Activity {
   boolean temporaryImapFailure(Throwable e){
     for(Throwable t=e;t!=null;t=t.getCause()){
       if(t instanceof java.net.SocketException || t instanceof java.net.SocketTimeoutException ||
+         t instanceof java.net.ConnectException || t instanceof java.net.UnknownHostException ||
          t instanceof java.io.EOFException || t instanceof javax.mail.FolderClosedException ||
          t instanceof javax.mail.StoreClosedException)return true;
       String msg=t.getMessage();
-      if(msg!=null && (msg.contains("Connection reset") || msg.contains("connection abort") || msg.contains("BYE")))return true;
+      if(msg!=null){String lower=msg.toLowerCase(Locale.ROOT);
+        if(lower.contains("connection reset") || lower.contains("connection abort") ||
+           lower.contains("connection refused") || lower.contains("timed out") ||
+           lower.contains("broken pipe") || lower.contains("* bye") ||
+           lower.contains("failed to connect") || lower.contains("couldn't connect"))return true;
+      }
     }
     return false;
+  }
+  void waitBeforeRetry(int attempt)throws InterruptedException{
+    Thread.sleep(attempt==0?1500L:3000L);
   }
   void syncOnce(String folder)throws Exception{
     Store st=connect();
@@ -114,18 +124,31 @@ public class MainActivity extends Activity {
   void openFolder(String folder){
     folderName=folder;renderCached(folder);
     if(!configured){content.addView(text("Sin sesión activa · Abre Cuenta para conectar; la caché sigue disponible",14));return;}
+    if(!syncing.compareAndSet(false,true)){
+      content.addView(text("Ya hay una sincronización en curso…",14));return;
+    }
     content.addView(text("Sincronizando…",14));
     work(()->{
-      Exception failure=null;
-      for(int attempt=0;attempt<2;attempt++){
-        try{syncOnce(folder);show(()->{if(folder.equals(folderName))renderCached(folder);});return;}
-        catch(Exception ex){failure=ex;if(!temporaryImapFailure(ex))throw ex;
-          if(attempt==0){try{Thread.sleep(1200);}catch(InterruptedException ie){Thread.currentThread().interrupt();return;}}
+      try{
+        for(int attempt=0;attempt<3;attempt++){
+          try{
+            // syncOnce always creates and closes its own Store and Folder.
+            syncOnce(folder);
+            show(()->{if(folder.equals(folderName))renderCached(folder);});
+            return;
+          }catch(Exception ex){
+            if(!temporaryImapFailure(ex))throw ex;
+            if(attempt<2){
+              try{waitBeforeRetry(attempt);}
+              catch(InterruptedException ie){Thread.currentThread().interrupt();return;}
+            }
+          }
         }
-      }
-      // A temporary connection loss must not hide the cached inbox or block the user.
-      final String message="Sin conexión con el servidor. Los correos guardados siguen disponibles. Pulsa Sincronizar para reintentar.";
-      show(()->{if(folder.equals(folderName)){renderCached(folder);content.addView(text(message,14));}});
+        show(()->{if(folder.equals(folderName)){
+          renderCached(folder);
+          content.addView(text("No se pudo conectar tras 3 intentos. Los correos guardados siguen disponibles. Puedes sincronizar de nuevo más tarde.",14));
+        }});
+      }finally{syncing.set(false);}
     });
   }
 

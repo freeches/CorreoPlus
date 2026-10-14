@@ -1,22 +1,22 @@
-# CorreoPlus v0.1 — prototipo
+# CorreoPlus V0.2 — prototipo Outlook-inspired
 
-## Implementado
-- Configuración temporal de un servidor IMAP seguro (IMAPS 993).
-- Lectura de los asuntos, remitentes y fechas de los últimos 15 correos de INBOX.
-- Redacción y envío mediante SMTP STARTTLS (587).
-- Las credenciales permanecen solo en memoria mientras la actividad está abierta; no se guardan en disco.
-- GitHub Actions para compilar APK sin ordenador.
+## Incluido
+- Bandeja con hasta 30 mensajes por página, remitente, asunto, fecha y estado leído.
+- Lectura de mensajes de texto y conversión simple de HTML a texto.
+- Decodificación MIME de encabezados.
+- Navegación por carpetas IMAP disponibles.
+- Respuesta, reenvío y composición básica.
+- IMAP 993 TLS directo o 143 STARTTLS obligatorio.
+- SMTP 465 TLS directo o 587 STARTTLS obligatorio.
+- Diseño de navegación azul inspirado en Outlook (no es una copia de Microsoft).
 
-## No implementado todavía
-- OAuth2 de Gmail y Microsoft/Outlook: **no funciona el inicio de sesión normal de estas cuentas**. Se necesita registrar aplicaciones OAuth, obtener client IDs y usar autorización segura.
-- Múltiples cuentas persistentes, vista de cuerpo de mensajes, adjuntos, búsqueda, carpetas, notificaciones, modo oscuro propio y sincronización en segundo plano.
-- Compatibilidad con todos los proveedores y puertos.
+## Limitaciones importantes
+- Una cuenta por sesión. No almacena credenciales; vuelve a introducirlas al reiniciar.
+- No incluye OAuth2 Gmail/Outlook, adjuntos, notificaciones, búsqueda, paginación completa ni borradores.
+- Las respuestas y reenvíos no preservan adjuntos ni cabeceras de hilo.
+- No admite contraseña SMTP distinta de la contraseña IMAP.
+- Solo se ha verificado estructura del proyecto; la compilación en GitHub Actions y pruebas en dispositivo están pendientes.
+- No usar como cliente de correo principal todavía. Evita introducir credenciales de cuentas sensibles hasta realizar auditoría de seguridad.
 
-## Seguridad y limitaciones
-- Usa TLS para IMAP y exige STARTTLS para SMTP.
-- No pegues contraseñas en GitHub ni en el chat.
-- No se ha compilado ni probado en un dispositivo en este entorno.
-- La aplicación es un prototipo de aprendizaje, no un cliente de correo listo para producción.
-
-## Compilar desde Android
-Descomprime y sube el contenido de esta carpeta a la raíz de un repositorio GitHub con MGit. Haz commit y push a main. En Actions descarga el artefacto CorreoPlus-APK del flujo Build CorreoPlus APK.
+## Instalación
+Subir el contenido del ZIP (incluida la carpeta oculta `.github`) al repositorio. Commit en main y consultar GitHub Actions. El flujo genera un APK de depuración cuando la compilación funciona.

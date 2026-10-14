@@ -1,12 +1,15 @@
-# CorreoPlus V0.6.1 — versión preliminar
+# CorreoPlus V0.7-alpha — avance comprobable
 
-## Cambios implementados
-- Filtros locales de bandeja: Todos, No leídos y Favoritos.
-- Estrella de favoritos en el listado; se guarda por cuenta, carpeta y UID.
-- Búsqueda offline en remitente, asunto y cuerpo descargado.
-- Conserva caché SQLite y credenciales de la versión anterior.
+Basado en CorreoPlus V0.6.1-preview. **No es la V0.7 completa.**
 
-## Pendiente
-- Multicuenta real, bandeja unificada, adjuntos, notificaciones, sincronización periódica, mover/archivar/borrar, OAuth2, biometría y tema oscuro.
+## Incorporado en este avance
+- Firma de correo configurable desde Cuenta, añadida al enviar mensajes de texto.
+- Preferencia de modo oscuro para las pantallas principales (no todos los controles nativos quedan adaptados).
+- Se conserva caché, favoritos, filtros, búsqueda y credenciales de la versión anterior.
 
-**No se ha compilado ni probado en Android en este entorno.** Conserva la APK que funciona y comprueba GitHub Actions antes de instalar. Los favoritos son locales y no se sincronizan con el servidor.
+## No incorporado todavía
+- Adjuntos entrantes y salientes, notificaciones, sincronización periódica, gestos, biometría y operaciones de mover/eliminar en servidor.
+- OAuth2 para Gmail y Outlook.
+
+## Verificación
+No se ha compilado ni probado en Android. Mantén la V0.6.1 instalada hasta obtener una compilación verde y probar el APK. Esta versión no modifica el esquema de la base de datos.

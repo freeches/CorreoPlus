@@ -69,50 +69,66 @@ public class MainActivity extends Activity {
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
   void menu(){layout("Correo");content.addView(button("☰ Carpetas",()->folders()));content.addView(button("⚙ Cuenta",()->settings()));content.addView(button("✎ Redactar",()->compose("","","")));}
+  boolean temporaryImapFailure(Throwable e){
+    for(Throwable t=e;t!=null;t=t.getCause()){
+      if(t instanceof java.net.SocketException || t instanceof java.net.SocketTimeoutException ||
+         t instanceof java.io.EOFException || t instanceof javax.mail.FolderClosedException ||
+         t instanceof javax.mail.StoreClosedException)return true;
+      String msg=t.getMessage();
+      if(msg!=null && (msg.contains("Connection reset") || msg.contains("connection abort") || msg.contains("BYE")))return true;
+    }
+    return false;
+  }
+  void syncOnce(String folder)throws Exception{
+    Store st=connect();
+    try{
+      Folder f=st.getFolder(folder);
+      try{
+        f.open(Folder.READ_ONLY);
+        int n=f.getMessageCount();
+        long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
+        long lastUid=cache.maxUid(lastAccount,folder,validity);
+        ArrayList<MailCache.Item> batch=new ArrayList<>();
+        for(int i=n;i>Math.max(0,n-100);i--){
+          Message m=f.getMessage(i);
+          long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
+          MailCache.Item existing=uid<=lastUid?cache.get(lastAccount,folder,uid):null;
+          boolean seen=m.isSet(Flags.Flag.SEEN);
+          if(existing!=null){if(existing.seen!=seen)cache.updateSeen(lastAccount,folder,validity,uid,seen);}
+          else{Date d=m.getSentDate();batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null));}
+        }
+        cache.saveHeaders(lastAccount,folder,validity,batch);
+        ArrayList<MailCache.Item> recent=cache.list(lastAccount,folder);
+        for(int j=0;j<Math.min(20,recent.size());j++){
+          MailCache.Item item=recent.get(j);
+          if(item.body==null){
+            try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(item.uid):null;
+              if(m!=null)cache.saveBody(lastAccount,folder,item.uid,body(m,0));
+            }catch(Exception ex){if(temporaryImapFailure(ex))throw ex;}
+          }
+        }
+        prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
+      }finally{try{if(f.isOpen())f.close(false);}catch(Exception ignored){}}
+    }finally{try{if(st.isConnected())st.close();}catch(Exception ignored){}}
+  }
   void openFolder(String folder){
     folderName=folder;renderCached(folder);
     if(!configured){content.addView(text("Sin sesión activa · Abre Cuenta para conectar; la caché sigue disponible",14));return;}
     content.addView(text("Sincronizando…",14));
     work(()->{
-      Store st=connect();
-      try{
-        Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);
-        try{
-          int n=f.getMessageCount();
-          long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
-          long lastUid=cache.maxUid(lastAccount,folder,validity);
-          ArrayList<MailCache.Item> batch=new ArrayList<>();
-          // Scan the most recent messages for updated read flags; download headers only for new UIDs.
-          for(int i=n;i>Math.max(0,n-100);i--){
-            Message m=f.getMessage(i);
-            long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
-            MailCache.Item existing=uid<=lastUid?cache.get(lastAccount,folder,uid):null;
-            boolean seen=m.isSet(Flags.Flag.SEEN);
-            if(existing!=null){
-              if(existing.seen!=seen)cache.updateSeen(lastAccount,folder,validity,uid,seen);
-            }else{
-              Date d=m.getSentDate();
-              batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null));
-            }
-          }
-          cache.saveHeaders(lastAccount,folder,validity,batch);
-          // Download only the bodies missing from the most recent messages.
-          ArrayList<MailCache.Item> recent=cache.list(lastAccount,folder);
-          for(int j=0;j<Math.min(20,recent.size());j++){
-            MailCache.Item item=recent.get(j);
-            if(item.body==null){
-              try{
-                Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(item.uid):null;
-                if(m!=null)cache.saveBody(lastAccount,folder,item.uid,body(m,0));
-              }catch(Exception ignored){}
-            }
-          }
-          prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
-          show(()->renderCached(folder));
-        }finally{f.close(false);}
-      }finally{st.close();}
+      Exception failure=null;
+      for(int attempt=0;attempt<2;attempt++){
+        try{syncOnce(folder);show(()->{if(folder.equals(folderName))renderCached(folder);});return;}
+        catch(Exception ex){failure=ex;if(!temporaryImapFailure(ex))throw ex;
+          if(attempt==0){try{Thread.sleep(1200);}catch(InterruptedException ie){Thread.currentThread().interrupt();return;}}
+        }
+      }
+      // A temporary connection loss must not hide the cached inbox or block the user.
+      final String message="Sin conexión con el servidor. Los correos guardados siguen disponibles. Pulsa Sincronizar para reintentar.";
+      show(()->{if(folder.equals(folderName)){renderCached(folder);content.addView(text(message,14));}});
     });
   }
+
   void renderCached(String folder){folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));
     long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
     content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));

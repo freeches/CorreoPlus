@@ -1,20 +1,12 @@
-# CorreoPlus V0.6 — avance de desarrollo
+# CorreoPlus V0.6.1 — versión preliminar
 
-Esta es una versión **preview**, NO la V0.6 completa prometida.
+## Cambios implementados
+- Filtros locales de bandeja: Todos, No leídos y Favoritos.
+- Estrella de favoritos en el listado; se guarda por cuenta, carpeta y UID.
+- Búsqueda offline en remitente, asunto y cuerpo descargado.
+- Conserva caché SQLite y credenciales de la versión anterior.
 
-## Añadido
-- Favoritos locales por cuenta, carpeta y UID; accesibles desde la pantalla del mensaje.
-- Búsqueda offline también en el cuerpo de los mensajes que ya estén descargados.
-- Indicador de favorito en los resultados.
-- Conserva la base de V0.5 y su caché.
+## Pendiente
+- Multicuenta real, bandeja unificada, adjuntos, notificaciones, sincronización periódica, mover/archivar/borrar, OAuth2, biometría y tema oscuro.
 
-## Todavía NO implementado
-- Varias cuentas simultáneas y bandeja unificada.
-- Adjuntos y envío de archivos.
-- Notificaciones y sincronización periódica con WorkManager.
-- Mover, borrar o archivar mensajes en el servidor.
-- Biometría, gestos y modo oscuro.
-- OAuth2 Gmail/Outlook.
-
-## Seguridad y verificación
-No se ha compilado en Android ni probado en un dispositivo. No sustituir la V0.5 estable sin copia de respaldo. La marca de favoritos es local, no sincronizada con el servidor. El esquema de caché no se modifica.
+**No se ha compilado ni probado en Android en este entorno.** Conserva la APK que funciona y comprueba GitHub Actions antes de instalar. Los favoritos son locales y no se sincronizan con el servidor.

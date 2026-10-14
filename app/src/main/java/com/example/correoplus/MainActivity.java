@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
   final Handler ui=new Handler(Looper.getMainLooper());
   MailCache cache; String lastAccount=""; SharedPreferences prefs;
   LinearLayout root, content, toolbar; EditText host, port, user, pass, smtpHost, smtpPort;
-  String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX";
+  String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX"; int inboxFilter=0;
   final int navy=Color.rgb(17,43,74), blue=Color.rgb(0,105,185);
   interface Task { void run() throws Exception; }
   void work(Task task){new Thread(()->{try{task.run();}catch(Exception e){error(e.getClass().getSimpleName()+": "+e.getMessage());}}).start();}
@@ -107,6 +107,12 @@ public class MainActivity extends Activity {
   void renderCached(String folder){folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));
     long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
     content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));
+    LinearLayout filters=new LinearLayout(this);filters.setOrientation(LinearLayout.HORIZONTAL);
+    content.addView(filters);
+    filters.addView(button("Todos",()->{inboxFilter=0;renderCached(folder);}));
+    filters.addView(button("No leídos",()->{inboxFilter=1;renderCached(folder);}));
+    filters.addView(button("★ Favoritos",()->{inboxFilter=2;renderCached(folder);}));
+    content.addView(text("Filtro: "+(inboxFilter==1?"No leídos":inboxFilter==2?"Favoritos":"Todos"),12));
     EditText search=input(content,"Buscar remitente, asunto o contenido (caché)","",false);
     LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
     search.addTextChangedListener(new android.text.TextWatcher(){
@@ -121,13 +127,15 @@ public class MainActivity extends Activity {
   void toggleFavorite(String folder,long uid){
     String key="fav_"+lastAccount+"_"+folder+"_"+uid;
     prefs.edit().putBoolean(key,!prefs.getBoolean(key,false)).apply();
-    openCachedMessage(folder,uid);
+    renderCached(folder);
   }
   void renderSearch(LinearLayout target,String folder,String query){
     target.removeAllViews();
     ArrayList<MailCache.Item> rows=cache.search(lastAccount,folder,query);
     for(MailCache.Item r:rows){
-      TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);
+      if(inboxFilter==1 && r.seen)continue;
+      if(inboxFilter==2 && !isFavorite(folder,r.uid))continue;
+      TextView item=text((isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);
       item.setBackgroundColor(Color.rgb(245,248,252));
       LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
       target.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));

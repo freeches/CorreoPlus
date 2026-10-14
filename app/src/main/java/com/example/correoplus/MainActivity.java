@@ -2,6 +2,11 @@ package com.example.correoplus;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.ActivityNotFoundException;
+import androidx.core.content.FileProvider;
+import android.webkit.MimeTypeMap;
+import java.io.File;
+import java.io.FileOutputStream;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 import java.io.InputStream;
@@ -48,6 +53,9 @@ public class MainActivity extends Activity {
   final ArrayList<Uri> outgoingAttachments=new ArrayList<>();
   byte[] pendingDownload; String pendingFilename;
   LinearLayout attachmentPreview;
+  LinearLayout receivedAttachments;
+  String sizeKB(long size){return size<0?"tamaño no disponible":String.format(java.util.Locale.getDefault(),"%.1f KB",size/1024.0);}
+  String mimeFor(String filename){String ext=MimeTypeMap.getFileExtensionFromUrl(filename);if(ext==null||ext.isEmpty()){int dot=filename.lastIndexOf('.');ext=dot>=0?filename.substring(dot+1):"";}String type=MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));return type==null?"application/octet-stream":type;}
   static class AttachmentInfo {String name; int index; long size; AttachmentInfo(String n,int i,long z){name=n;index=i;size=z;}}
   String safeName(String name){if(name==null||name.trim().isEmpty())return "adjunto";return name.replace('\\','_').replace('/','_').replace('\n','_').replace('\r','_');}
   void collectAttachments(Part part,ArrayList<AttachmentInfo> result,int depth)throws Exception{
@@ -75,26 +83,43 @@ public class MainActivity extends Activity {
     return null;
   }
   void loadAttachments(String folder,long uid){
-    content.addView(text("Buscando adjuntos…",13));
+    if(receivedAttachments==null)return;
+    LinearLayout target=receivedAttachments;
+    target.removeAllViews();target.addView(text("Cargando adjuntos…",13));
     work(()->{Store st=connect();try{Folder f=st.getFolder(folder);try{f.open(Folder.READ_ONLY);
       Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
       if(m==null)throw new Exception("El mensaje ya no está disponible en el servidor");
       ArrayList<AttachmentInfo> attachments=new ArrayList<>();collectAttachments(m,attachments,0);
-      show(()->{openCachedMessage(folder,uid);if(attachments.isEmpty())content.addView(text("Sin adjuntos",13));
-        else{content.addView(text("Adjuntos ("+attachments.size()+")",18));for(AttachmentInfo a:attachments)
-          content.addView(button("↓ "+a.name+(a.size>=0?" ("+a.size+" bytes)":""),()->downloadAttachment(folder,uid,a.index,a.name)));}});
+      show(()->{if(receivedAttachments!=target)return;target.removeAllViews();if(!attachments.isEmpty()){
+        target.addView(text("📎 Adjuntos ("+attachments.size()+")",18));
+        for(AttachmentInfo a:attachments){target.addView(button("📄 "+a.name+" · "+sizeKB(a.size)+"   Abrir",()->openAttachment(folder,uid,a.index,a.name)));
+          target.addView(button("↓ Guardar "+a.name,()->downloadAttachment(folder,uid,a.index,a.name)));}
+      }});
     }finally{if(f.isOpen())f.close(false);}}finally{st.close();}});
   }
-  void downloadAttachment(String folder,long uid,int index,String filename){
-    work(()->{Store st=connect();try{Folder f=st.getFolder(folder);try{f.open(Folder.READ_ONLY);
+  byte[] getAttachmentBytes(String folder,long uid,int index)throws Exception{
+    Store st=connect();try{Folder f=st.getFolder(folder);try{f.open(Folder.READ_ONLY);
       Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
       if(m==null)throw new Exception("Mensaje no disponible");
       Part part=attachmentByIndex(m,new int[]{0},index,0);if(part==null)throw new Exception("Adjunto no encontrado");
       ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=part.getInputStream()){
         byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){if(out.size()+n>25*1024*1024)throw new Exception("El adjunto supera el límite de 25 MB");out.write(buffer,0,n);}}
-      byte[] bytes=out.toByteArray();show(()->{pendingDownload=bytes;pendingFilename=filename;
-        Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.setType("application/octet-stream");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.putExtra(Intent.EXTRA_TITLE,filename);startActivityForResult(intent,SAVE_ATTACHMENT);});
-    }finally{if(f.isOpen())f.close(false);}}finally{st.close();}});
+      return out.toByteArray();
+    }finally{if(f.isOpen())f.close(false);}}finally{st.close();}
+  }
+  void openAttachment(String folder,long uid,int index,String filename){
+    work(()->{byte[] bytes=getAttachmentBytes(folder,uid,index);
+      File dir=new File(getCacheDir(),"shared_attachments");if(!dir.exists()&&!dir.mkdirs())throw new Exception("No se pudo preparar el archivo temporal");
+      File file=new File(dir,java.util.UUID.randomUUID().toString()+"_"+safeName(filename));
+      try(FileOutputStream output=new FileOutputStream(file)){output.write(bytes);}
+      Uri uri=FileProvider.getUriForFile(this,getPackageName()+".fileprovider",file);
+      show(()->{Intent intent=new Intent(Intent.ACTION_VIEW);intent.setDataAndType(uri,mimeFor(filename));intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try{startActivity(Intent.createChooser(intent,"Abrir adjunto"));}catch(ActivityNotFoundException e){Toast.makeText(this,"No hay una aplicación para abrir este tipo de archivo",Toast.LENGTH_LONG).show();}});
+    });
+  }
+  void downloadAttachment(String folder,long uid,int index,String filename){
+    work(()->{byte[] bytes=getAttachmentBytes(folder,uid,index);show(()->{pendingDownload=bytes;pendingFilename=filename;
+      Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.setType(mimeFor(filename));intent.addCategory(Intent.CATEGORY_OPENABLE);intent.putExtra(Intent.EXTRA_TITLE,filename);startActivityForResult(intent,SAVE_ATTACHMENT);});});
   }
   String attachmentName(Uri uri){try(android.database.Cursor c=getContentResolver().query(uri,null,null,null,null)){
     if(c!=null&&c.moveToFirst()){int i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(i>=0)return safeName(c.getString(i));}}
@@ -267,7 +292,7 @@ public class MainActivity extends Activity {
   }
   void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));content.addView(text("De: "+cached.from,15));
     content.addView(button(isFavorite(folder,uid)?"★ Quitar de favoritos":"☆ Añadir a favoritos",()->toggleFavorite(folder,uid)));
-    content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("📎 Ver adjuntos",()->loadAttachments(folder,uid)));content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
+    receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
   void fetchBody(String folder,long uid){work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;if(m==null)throw new Exception("Mensaje no disponible en el servidor");String bodyText=body(m,0);cache.saveBody(lastAccount,folder,uid,bodyText);show(()->openCachedMessage(folder,uid));}finally{f.close(false);}}finally{st.close();}});}
 
   void renderMessages(String folder,int total,ArrayList<String[]> rows){menu();content.addView(text(folder+" · "+total+" mensajes",19));content.addView(button("↻ Actualizar",()->openFolder(folder)));for(String[] r:rows){TextView item=text(r[4]+r[1]+"\n"+r[2]+"\n"+r[3],15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openMessage(folder,Integer.parseInt(r[0])));}}

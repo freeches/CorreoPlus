@@ -39,16 +39,22 @@ public final class MailCache extends SQLiteOpenHelper {
     private long validity(String account,String folder){try(Cursor c=getReadableDatabase().rawQuery("SELECT validity FROM folders WHERE account=? AND folder=?",new String[]{account,folder})){return c.moveToFirst()?c.getLong(0):-1;}}
     public synchronized ArrayList<Item> list(String account,String folder){ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body FROM messages WHERE account=? AND folder=? AND validity=? ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val)})){while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5)));}return out;}
     public synchronized Item get(String account,String folder,long uid){for(Item i:list(account,folder))if(i.uid==uid)return i;return null;}
-    public synchronized ArrayList<Item> search(String account,String folder,String term){
-        ArrayList<Item> result=new ArrayList<>();
-        long val=validity(account,folder);
-        String pattern="%"+term.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";
-        try(Cursor c=getReadableDatabase().rawQuery(
-            "SELECT uid,sender,subject,date_text,seen,body FROM messages WHERE account=? AND folder=? AND validity=? AND (sender LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\') ORDER BY uid DESC LIMIT 100",
-            new String[]{account,folder,String.valueOf(val),pattern,pattern})){
-            while(c.moveToNext())result.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5)));
-        }
-        return result;
-    }
     public synchronized void saveBody(String account,String folder,long uid,String body){ContentValues v=new ContentValues();v.put("body",body);getWritableDatabase().update("messages",v,"account=? AND folder=? AND validity=? AND uid=?",new String[]{account,folder,String.valueOf(validity(account,folder)),String.valueOf(uid)});}
+    public synchronized long maxUid(String account,String folder,long validity){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT MAX(uid) FROM messages WHERE account=? AND folder=? AND validity=?",new String[]{account,folder,String.valueOf(validity)})){
+            return c.moveToFirst()&&!c.isNull(0)?c.getLong(0):0;
+        }
+    }
+    public synchronized void updateSeen(String account,String folder,long validity,long uid,boolean seen){
+        ContentValues values=new ContentValues();values.put("seen",seen?1:0);
+        getWritableDatabase().update("messages",values,"account=? AND folder=? AND validity=? AND uid=?",new String[]{account,folder,String.valueOf(validity),String.valueOf(uid)});
+    }
+    public synchronized ArrayList<Item> search(String account,String folder,String query){
+        ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);
+        String term="%"+query.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body FROM messages WHERE account=? AND folder=? AND validity=? AND (sender LIKE ? ESCAPE '\\' OR subject LIKE ? ESCAPE '\\') ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val),term,term})){
+            while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5)));
+        }
+        return out;
+    }
 }

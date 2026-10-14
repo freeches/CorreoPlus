@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.database.Cursor;
+import android.content.SharedPreferences;
 import android.text.TextUtils;
 import com.sun.mail.imap.IMAPFolder;
 import android.text.InputType;
@@ -30,9 +31,9 @@ import javax.mail.internet.MimeUtility;
 
 public class MainActivity extends Activity {
   final Handler ui=new Handler(Looper.getMainLooper());
-  MailCache cache; String lastAccount="";
+  MailCache cache; String lastAccount=""; SharedPreferences prefs;
   LinearLayout root, content, toolbar; EditText host, port, user, pass, smtpHost, smtpPort;
-  String h,u,pw,sh; int imapPort,sPort; boolean configured=false; String folderName="INBOX";
+  String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX";
   final int navy=Color.rgb(17,43,74), blue=Color.rgb(0,105,185);
   interface Task { void run() throws Exception; }
   void work(Task task){new Thread(()->{try{task.run();}catch(Exception e){error(e.getClass().getSimpleName()+": "+e.getMessage());}}).start();}
@@ -41,27 +42,88 @@ public class MainActivity extends Activity {
   Button button(String name,Runnable run){Button b=new Button(this);b.setText(name);b.setAllCaps(false);b.setOnClickListener(v->run.run());return b;}
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
   void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.WHITE);setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc);}
-  @Override public void onCreate(Bundle b){super.onCreate(b);cache=new MailCache(this);lastAccount=getPreferences(0).getString("account","");if(lastAccount.isEmpty())settings();else renderCached("INBOX");}
-  void settings(){layout("Cuentas");content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Las credenciales permanecen solo en memoria durante esta sesión.",13));host=input(content,"Servidor IMAP","",false);port=input(content,"Puerto IMAP 993 o 143","993",false);user=input(content,"Correo / usuario","",false);pass=input(content,"Contraseña IMAP", "",true);smtpHost=input(content,"Servidor SMTP","",false);smtpPort=input(content,"Puerto SMTP 465 o 587","587",false);content.addView(button("Conectar y abrir bandeja",()->{try{h=host.getText().toString().trim();u=user.getText().toString().trim();pw=pass.getText().toString();sh=smtpHost.getText().toString().trim();imapPort=Integer.parseInt(port.getText().toString().trim());sPort=Integer.parseInt(smtpPort.getText().toString().trim());if(h.isEmpty()||u.isEmpty()||pw.isEmpty()||!(imapPort==993||imapPort==143)||!(sPort==465||sPort==587))throw new Exception("Revisa servidor, usuario, contraseña y puertos admitidos");configured=true;lastAccount=u.toLowerCase(Locale.ROOT)+"@"+h.toLowerCase(Locale.ROOT);getPreferences(0).edit().putString("account",lastAccount).apply();openFolder("INBOX");}catch(Exception e){error(e.getMessage());}}));}
+  @Override public void onCreate(Bundle b){super.onCreate(b);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
+    h=prefs.getString("imap_host",""); u=prefs.getString("username","");
+    sh=prefs.getString("smtp_host","");
+    try { imapPort=Integer.parseInt(prefs.getString("imap_port","993")); sPort=Integer.parseInt(prefs.getString("smtp_port","587")); }
+    catch(NumberFormatException e){imapPort=993;sPort=587;}
+    try { pw=CredentialVault.load(this,lastAccount); configured=pw!=null && !h.isEmpty() && !u.isEmpty(); }
+    catch(Exception e){configured=false;pw=null;}
+    renderCached("INBOX");
+    if(configured) openFolder("INBOX");
+  }}
+  void settings(){layout("Cuentas");content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
+  CheckBox remember=new CheckBox(this);remember.setText("Recordar contraseña cifrada en este dispositivo");content.addView(remember);
+  content.addView(button("Borrar contraseña guardada",()->{CredentialVault.clear(this);pw=null;configured=false;error("Credenciales guardadas eliminadas");}));smtpHost=input(content,"Servidor SMTP",prefs.getString("smtp_host",""),false);smtpPort=input(content,"Puerto SMTP 465 o 587",prefs.getString("smtp_port","587"),false);content.addView(button("Conectar y abrir bandeja",()->{try{h=host.getText().toString().trim();u=user.getText().toString().trim();pw=pass.getText().toString();sh=smtpHost.getText().toString().trim();imapPort=Integer.parseInt(port.getText().toString().trim());sPort=Integer.parseInt(smtpPort.getText().toString().trim());if(h.isEmpty()||u.isEmpty()||pw.isEmpty()||!(imapPort==993||imapPort==143)||!(sPort==465||sPort==587))throw new Exception("Revisa servidor, usuario, contraseña y puertos admitidos");rememberPassword=remember.isChecked();configured=true;lastAccount=u.toLowerCase(Locale.ROOT)+"@"+h.toLowerCase(Locale.ROOT);if(rememberPassword){CredentialVault.save(this,lastAccount,pw);}else{CredentialVault.clear(this);}prefs.edit().putString("account",lastAccount).putString("imap_host",h).putString("imap_port",String.valueOf(imapPort)).putString("username",u).putString("smtp_host",sh).putString("smtp_port",String.valueOf(sPort)).apply();openFolder("INBOX");}catch(Exception e){error(e.getMessage());}}));}
   Properties imapProperties(){Properties props=new Properties();props.put("mail.store.protocol",imapPort==993?"imaps":"imap");String prefix=imapPort==993?"mail.imaps":"mail.imap";props.put(prefix+".connectiontimeout","15000");props.put(prefix+".timeout","15000");if(imapPort==993)props.put("mail.imaps.ssl.enable","true");else{props.put("mail.imap.starttls.enable","true");props.put("mail.imap.starttls.required","true");}return props;}
   Store connect()throws Exception{Session s=Session.getInstance(imapProperties());Store st=s.getStore(imapPort==993?"imaps":"imap");st.connect(h,imapPort,u,pw);return st;}
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
   void menu(){layout("Correo");content.addView(button("☰ Carpetas",()->folders()));content.addView(button("⚙ Cuenta",()->settings()));content.addView(button("✎ Redactar",()->compose("","","")));}
-  void openFolder(String folder){folderName=folder;renderCached(folder);if(!configured){content.addView(text("Modo sin conexión · Configura la cuenta para sincronizar",14));return;}content.addView(text("Sincronizando…",14));work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{int n=f.getMessageCount();long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;ArrayList<MailCache.Item> batch=new ArrayList<>();for(int i=n;i>Math.max(0,n-50);i--){Message m=f.getMessage(i);long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;Date d=m.getSentDate();batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),m.isSet(Flags.Flag.SEEN),null));}cache.saveHeaders(lastAccount,folder,validity,batch);getPreferences(0).edit().putLong("sync_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();for(int j=0;j<Math.min(20,batch.size());j++){MailCache.Item item=batch.get(j);MailCache.Item saved=cache.get(lastAccount,folder,item.uid);if(saved!=null&&saved.body==null){try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(item.uid):null;if(m!=null)cache.saveBody(lastAccount,folder,item.uid,body(m,0));}catch(Exception ignored){}}}show(()->renderCached(folder));}finally{f.close(false);}}finally{st.close();}});}
-  void renderCached(String folder){folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));long lastSync=getPreferences(0).getLong("sync_"+lastAccount+"_"+folder,0);content.addView(text(lastSync==0?"Sin sincronización registrada":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).format(new Date(lastSync)),12));content.addView(button("🔎 Buscar en mensajes guardados",()->searchCached(folder)));content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));for(MailCache.Item r:rows){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
-  void searchCached(String folder){
-    layout("Buscar");
-    EditText query=input(content,"Buscar remitente o asunto","",false);
-    content.addView(button("Buscar sin conexión",()->{
-      String term=query.getText().toString().trim();
-      if(term.isEmpty()){error("Introduce un término de búsqueda");return;}
-      ArrayList<MailCache.Item> results=cache.search(lastAccount,folder,term);
-      layout("Resultados");content.addView(button("← Bandeja",()->renderCached(folder)));
-      content.addView(text(results.size()+" resultados en caché",17));
-      for(MailCache.Item item:results){TextView row=text(item.from+"\n"+item.subject+"\n"+item.date,15);content.addView(row);row.setOnClickListener(v->openCachedMessage(folder,item.uid));}
-    }));
-    content.addView(button("← Volver",()->renderCached(folder)));
+  void openFolder(String folder){
+    folderName=folder;renderCached(folder);
+    if(!configured){content.addView(text("Sin sesión activa · Abre Cuenta para conectar; la caché sigue disponible",14));return;}
+    content.addView(text("Sincronizando…",14));
+    work(()->{
+      Store st=connect();
+      try{
+        Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);
+        try{
+          int n=f.getMessageCount();
+          long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
+          long lastUid=cache.maxUid(lastAccount,folder,validity);
+          ArrayList<MailCache.Item> batch=new ArrayList<>();
+          // Scan the most recent messages for updated read flags; download headers only for new UIDs.
+          for(int i=n;i>Math.max(0,n-100);i--){
+            Message m=f.getMessage(i);
+            long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
+            MailCache.Item existing=uid<=lastUid?cache.get(lastAccount,folder,uid):null;
+            boolean seen=m.isSet(Flags.Flag.SEEN);
+            if(existing!=null){
+              if(existing.seen!=seen)cache.updateSeen(lastAccount,folder,validity,uid,seen);
+            }else{
+              Date d=m.getSentDate();
+              batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null));
+            }
+          }
+          cache.saveHeaders(lastAccount,folder,validity,batch);
+          // Download only the bodies missing from the most recent messages.
+          ArrayList<MailCache.Item> recent=cache.list(lastAccount,folder);
+          for(int j=0;j<Math.min(20,recent.size());j++){
+            MailCache.Item item=recent.get(j);
+            if(item.body==null){
+              try{
+                Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(item.uid):null;
+                if(m!=null)cache.saveBody(lastAccount,folder,item.uid,body(m,0));
+              }catch(Exception ignored){}
+            }
+          }
+          prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
+          show(()->renderCached(folder));
+        }finally{f.close(false);}
+      }finally{st.close();}
+    });
+  }
+  void renderCached(String folder){folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));
+    long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
+    content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));
+    EditText search=input(content,"Buscar en remitente o asunto (caché)","",false);
+    LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
+    search.addTextChangedListener(new android.text.TextWatcher(){
+      public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+      public void onTextChanged(CharSequence s,int start,int before,int count){renderSearch(results,folder,s.toString());}
+      public void afterTextChanged(android.text.Editable e){}
+    });
+    renderSearch(results,folder,"");content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
+  void renderSearch(LinearLayout target,String folder,String query){
+    target.removeAllViews();
+    ArrayList<MailCache.Item> rows=cache.search(lastAccount,folder,query);
+    for(MailCache.Item r:rows){
+      TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);
+      item.setBackgroundColor(Color.rgb(245,248,252));
+      LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
+      target.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));
+    }
   }
   void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));content.addView(text("De: "+cached.from,15));content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
   void fetchBody(String folder,long uid){work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;if(m==null)throw new Exception("Mensaje no disponible en el servidor");String bodyText=body(m,0);cache.saveBody(lastAccount,folder,uid,bodyText);show(()->openCachedMessage(folder,uid));}finally{f.close(false);}}finally{st.close();}});}

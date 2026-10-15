@@ -33,6 +33,7 @@ import android.text.TextUtils;
 import com.sun.mail.imap.IMAPFolder;
 import android.text.InputType;
 import android.view.View;
+import android.view.MotionEvent;
 import android.widget.*;
 import java.util.*;
 import javax.mail.Address;
@@ -57,6 +58,8 @@ public class MainActivity extends Activity {
   String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX"; int inboxFilter=0;
   final int navy=Color.rgb(17,43,74), blue=Color.rgb(0,105,185);
   boolean darkMode=false;
+  final LinkedHashSet<Long> selectedUids=new LinkedHashSet<>();
+  boolean selectionMode=false;
   static final int PICK_ATTACHMENT=701, SAVE_ATTACHMENT=702;
   final ArrayList<Uri> outgoingAttachments=new ArrayList<>();
   byte[] pendingDownload; String pendingFilename;
@@ -265,7 +268,7 @@ public class MainActivity extends Activity {
     });
   }
 
-  void renderCached(String folder){folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));
+  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.list(lastAccount,folder);content.addView(text(folder+" · "+rows.size()+" mensajes guardados",19));
     long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
     content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));
     LinearLayout filters=new LinearLayout(this);filters.setOrientation(LinearLayout.HORIZONTAL);
@@ -282,7 +285,7 @@ public class MainActivity extends Activity {
       public void onTextChanged(CharSequence s,int start,int before,int count){renderSearch(results,folder,s.toString());}
       public void afterTextChanged(android.text.Editable e){}
     });
-    renderSearch(results,folder,"");content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
+    renderSearch(results,folder,"");content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
   boolean isFavorite(String folder,long uid){
     return prefs.getBoolean("fav_"+lastAccount+"_"+folder+"_"+uid,false);
   }
@@ -294,15 +297,70 @@ public class MainActivity extends Activity {
   void renderSearch(LinearLayout target,String folder,String query){
     target.removeAllViews();
     ArrayList<MailCache.Item> rows=cache.search(lastAccount,folder,query);
+    if(selectionMode){
+      LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.VERTICAL);target.addView(actions);
+      actions.addView(text(selectedUids.size()+" seleccionados",17));
+      actions.addView(button("✓ Seleccionar todos los visibles",()->{for(MailCache.Item r:rows)selectedUids.add(r.uid);renderSearch(target,folder,query);}));
+      actions.addView(button("✉ Marcar leídos",()->setSeenBatch(folder,true,new ArrayList<>(selectedUids))));
+      actions.addView(button("✉ Marcar no leídos",()->setSeenBatch(folder,false,new ArrayList<>(selectedUids))));
+      actions.addView(button("▣ Archivar seleccionados",()->confirmBatchMove(folder,false)));
+      actions.addView(button("🗑 Eliminar seleccionados",()->confirmBatchMove(folder,true)));
+      actions.addView(button("✕ Cancelar selección",()->{selectionMode=false;selectedUids.clear();renderSearch(target,folder,query);}));
+    }
     for(MailCache.Item r:rows){
       if(inboxFilter==1 && r.seen)continue;
       if(inboxFilter==2 && !isFavorite(folder,r.uid))continue;
       if(inboxFilter==3 && r.attachmentState!=1)continue;
-      TextView item=text((isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+(r.attachmentState==1?"📎 ":"")+r.from+"\n"+r.subject+"\n"+r.date,15);
-      item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));
+      String prefix=selectionMode?(selectedUids.contains(r.uid)?"☑ ":"☐ "):"";
+      TextView item=text(prefix+(isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+(r.attachmentState==1?"📎 ":"")+r.from+"\n"+r.subject+"\n"+r.date,15);
+      item.setPadding(18,18,18,18);
+      item.setBackgroundColor(selectedUids.contains(r.uid)?(darkMode?Color.rgb(52,78,110):Color.rgb(211,232,249)):(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252)));
       LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
-      target.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));
+      target.addView(item,lp);
+      item.setOnLongClickListener(v->{selectionMode=true;selectedUids.add(r.uid);renderSearch(target,folder,query);return true;});
+      final float[] down={0,0};
+      item.setOnTouchListener((v,event)->{
+        if(event.getAction()==MotionEvent.ACTION_DOWN){down[0]=event.getX();down[1]=event.getY();return false;}
+        if(event.getAction()==MotionEvent.ACTION_UP && !selectionMode){
+          float dx=event.getX()-down[0],dy=event.getY()-down[1];
+          if(Math.abs(dx)>110*getResources().getDisplayMetrics().density && Math.abs(dx)>Math.abs(dy)*1.5f){
+            confirmMove(folder,r.uid,dx>0?false:true);return true;
+          }
+        }
+        return false;
+      });
+      item.setOnClickListener(v->{if(selectionMode){if(!selectedUids.add(r.uid))selectedUids.remove(r.uid);renderSearch(target,folder,query);}else openCachedMessage(folder,r.uid);});
     }
+  }
+  void setSeenBatch(String folder,boolean seen,ArrayList<Long> ids){
+    if(ids.isEmpty()){Toast.makeText(this,"Selecciona algún correo",Toast.LENGTH_SHORT).show();return;}
+    work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_WRITE);try{
+      long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():-1;
+      for(long uid:ids){Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
+        if(m!=null){m.setFlag(Flags.Flag.SEEN,seen);cache.updateSeen(lastAccount,folder,validity,uid,seen);}}
+    }finally{f.close(false);}}finally{st.close();}
+    show(()->{selectionMode=false;selectedUids.clear();renderCached(folder);});});
+  }
+  void confirmBatchMove(String folder,boolean delete){
+    ArrayList<Long> ids=new ArrayList<>(selectedUids);
+    if(ids.isEmpty()){Toast.makeText(this,"Selecciona algún correo",Toast.LENGTH_SHORT).show();return;}
+    new AlertDialog.Builder(this).setTitle(delete?"Eliminar seleccionados":"Archivar seleccionados")
+      .setMessage("Se moverán "+ids.size()+" mensajes en el servidor. ¿Continuar?")
+      .setNegativeButton("Cancelar",null).setPositiveButton("Continuar",(d,w)->moveBatch(folder,ids,delete)).show();
+  }
+  void moveBatch(String folder,ArrayList<Long> ids,boolean delete){
+    work(()->{Store st=connect();try{Folder source=st.getFolder(folder);source.open(Folder.READ_WRITE);try{
+      String[] targets=delete?new String[]{"Trash","INBOX.Trash","Deleted Items","Papelera"}:new String[]{"Archive","INBOX.Archive","Archives","Archivo"};
+      Folder destination=null;for(String name:targets){Folder candidate=st.getFolder(name);if(candidate.exists()){destination=candidate;break;}}
+      if(destination==null)throw new Exception("No se encontró la carpeta de destino");
+      ArrayList<Message> messages=new ArrayList<>();ArrayList<Long> validIds=new ArrayList<>();
+      for(long uid:ids){Message m=source instanceof IMAPFolder?((IMAPFolder)source).getMessageByUID(uid):null;if(m!=null){messages.add(m);validIds.add(uid);}}
+      if(!messages.isEmpty()){Message[] batch=messages.toArray(new Message[0]);source.copyMessages(batch,destination);
+        for(Message m:batch)m.setFlag(Flags.Flag.DELETED,true);
+        source.close(true);for(long uid:validIds)cache.remove(lastAccount,folder,uid);
+      }
+      show(()->{selectionMode=false;selectedUids.clear();renderCached(folder);Toast.makeText(this,"Mensajes movidos: "+validIds.size(),Toast.LENGTH_SHORT).show();});
+    }finally{if(source.isOpen())source.close(false);}}finally{st.close();}});
   }
   String htmlBody(Part part,int depth)throws Exception{
     if(depth>10)return "";
@@ -359,7 +417,7 @@ public class MainActivity extends Activity {
   String htmlEscape(String value){return android.text.TextUtils.htmlEncode(value).replace("\n","<br>");}
   void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));content.addView(text("De: "+cached.from,15));
     content.addView(button(isFavorite(folder,uid)?"★ Quitar de favoritos":"☆ Añadir a favoritos",()->toggleFavorite(folder,uid)));
-    if(configured){content.addView(button("▣ Archivar",()->confirmMove(folder,uid,false)));content.addView(button("🗑 Eliminar",()->confirmMove(folder,uid,true)));}
+    if(configured){content.addView(button("✉ Marcar como leído",()->setSeenBatch(folder,true,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("✉ Marcar como no leído",()->setSeenBatch(folder,false,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("▣ Archivar",()->confirmMove(folder,uid,false)));content.addView(button("🗑 Eliminar",()->confirmMove(folder,uid,true)));}
     receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
   void confirmMove(String folder,long uid,boolean delete){
     new AlertDialog.Builder(this).setTitle(delete?"Mover a Papelera":"Archivar mensaje")

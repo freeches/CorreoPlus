@@ -1,19 +1,16 @@
-# CorreoPlus V0.9 Beta
+# CorreoPlus V1.0 Beta
 
-Basado en V0.8.3.1. Sigue siendo una sola cuenta.
+Actualización desde V0.9 Beta. Una sola cuenta IMAP/SMTP.
 
-## Nuevas funciones
-- Sincronización IMAP periódica con WorkManager (mínimo 15 minutos, Android puede retrasarla).
-- Notificación de nuevos mensajes no leídos desde la última sincronización de referencia; no se notifican los correos antiguos en el primer ciclo.
-- Interruptor de sincronización y notificaciones en Cuenta. Requiere contraseña recordada cifrada con Android Keystore.
-- Archivar y mover a Papelera desde el mensaje, con confirmación. Se usan carpetas IMAP existentes (Archive/Archives/Archivo, Trash/Deleted Items/Papelera); si no existen, se avisa y no se mueve nada.
+## Novedades
+- Pulsación larga sobre un mensaje para iniciar selección múltiple.
+- Selección múltiple: marcar leído/no leído, archivar o mover a Papelera.
+- Deslizamiento horizontal en la lista: derecha para archivar, izquierda para eliminar (con confirmación).
+- Marcar leído/no leído desde la vista del mensaje.
+- Mejoras visuales en filas, espaciado y selección.
 
-## Limitaciones
-- Beta no compilada en este entorno; verificar GitHub Actions y pruebas reales.
-- No hay sincronización instantánea ni garantía de ejecución cada 15 minutos.
-- No se han añadido todavía gestos ni editor HTML avanzado.
-- Si Android restringe notificaciones o batería, puede retrasar o impedir avisos.
-- Antes de instalar, conserva una copia de la V0.8.3.1.
+## Nota
+El rendimiento con miles de mensajes sigue limitado por la consulta de 100 mensajes de la caché. No se ha implementado todavía paginación ni carga incremental. Los cambios de leído/no leído requieren conexión. No se ha probado la compilación en Android en este entorno.
 
 ## Instalación
-Descomprime el ZIP en el repositorio y usa MGit: Stage, Commit, Push. Descarga el APK de GitHub Actions si la compilación finaliza correctamente.
+Extraer el ZIP en el repositorio de GitHub, hacer Stage/Commit/Push con MGit y descargar el APK generado por GitHub Actions. Mantener una copia de la V0.9.

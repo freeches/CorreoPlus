@@ -6,3 +6,9 @@ CorreoPlus V1.0.5
 - Conserva adjuntos y destinatarios desplegables.
 
 Compilación Android no verificada; probar con GitHub Actions.
+
+
+## V1.0.6 - barra fija visible
+Se corrige la pantalla de lectura: el contenido se desplaza dentro de un FrameLayout y la barra de acciones se ancla abajo, fuera del ScrollView. Se reserva espacio al final del contenido para que la barra no tape el mensaje.
+
+Pendiente de compilación en GitHub Actions y prueba en un dispositivo Android.

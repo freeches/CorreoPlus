@@ -519,6 +519,15 @@ public class MainActivity extends Activity {
   void openCachedMessage(String folder,long uid){
     MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;
     layout("Mensaje");
+    // Keep actions outside the scrolling message, in a bottom-anchored overlay.
+    // This avoids losing them beneath long messages or nested content.
+    ScrollView messageScroll=(ScrollView)root.getChildAt(1);
+    root.removeView(messageScroll);
+    FrameLayout messageFrame=new FrameLayout(this);
+    root.addView(messageFrame,new LinearLayout.LayoutParams(-1,0,1));
+    messageFrame.addView(messageScroll,new FrameLayout.LayoutParams(-1,-1));
+    int actionHeight=(int)(60*getResources().getDisplayMetrics().density);
+    content.setPadding(14,12,14,12+actionHeight);
     content.addView(button("← Volver",()->renderCached(folder)));
     TextView subject=text(cached.subject,23);subject.setTypeface(null,Typeface.BOLD);content.addView(subject);
     LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -550,7 +559,11 @@ public class MainActivity extends Activity {
     if(configured)loadAttachments(folder,uid);
     content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
     LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);
-    root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
+    actions.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    actions.setBackgroundColor(darkMode?Color.rgb(30,39,51):Color.WHITE);
+    actions.setElevation(8*getResources().getDisplayMetrics().density);
+    FrameLayout.LayoutParams barParams=new FrameLayout.LayoutParams(-1,actionHeight,android.view.Gravity.BOTTOM);
+    messageFrame.addView(actions,barParams);
     addMessageAction(actions,"☆",()->toggleFavorite(folder,uid));
     if(configured){
       addMessageAction(actions,"▣",()->confirmMove(folder,uid,false));

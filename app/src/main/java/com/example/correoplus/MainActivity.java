@@ -661,8 +661,8 @@ public class MainActivity extends Activity {
     // Root is VERTICAL: the weighted ScrollView ends above this always-visible bar.
     root.addView(actions,new LinearLayout.LayoutParams(-1,actionHeight));
     if(configured){
-      addMessageAction(actions,"↩","Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,""));
-      addMessageAction(actions,"➜","Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body));
+      addMessageAction(actions,"↩","Responder",()->prepareResponse(folder,uid,"reply"));
+      addMessageAction(actions,"➜","Reenviar",()->prepareResponse(folder,uid,"forward"));
       addMessageAction(actions,"▣","Archivar",()->confirmMove(folder,uid,false));
       addMessageAction(actions,"✕","Eliminar",()->confirmMove(folder,uid,true));
     }else{
@@ -681,12 +681,14 @@ public class MainActivity extends Activity {
   void showMessageOptions(View anchor,String folder,long uid,boolean seen){
     PopupMenu popup=new PopupMenu(this,anchor);
     popup.getMenu().add(seen?"Marcar como no leído":"Marcar como leído");
+    popup.getMenu().add("Responder a todos");
     popup.getMenu().add("Descargar contenido");
     popup.getMenu().add(htmlVisible?"Ver texto plano":"Ver HTML original");
     popup.getMenu().add("Mover a carpeta (archivar)");
     popup.setOnMenuItemClickListener(item->{
       String choice=item.getTitle().toString();
       if(choice.startsWith("Marcar como"))setSeenBatch(folder,!seen,new ArrayList<>(java.util.Collections.singletonList(uid)));
+      else if(choice.equals("Responder a todos"))prepareResponse(folder,uid,"all");
       else if(choice.equals("Descargar contenido"))fetchBody(folder,uid);
       else if(choice.equals("Ver HTML original"))showHtmlMessage(folder,uid);
       else if(choice.equals("Ver texto plano"))showPlainMessage(folder,uid);
@@ -740,9 +742,76 @@ public class MainActivity extends Activity {
   String body(Part part,int depth)throws Exception{if(depth>8)return "";if(part.isMimeType("text/plain")){Object c=part.getContent();return c==null?"":c.toString();}if(part.isMimeType("text/html")){Object c=part.getContent();return c==null?"":android.text.Html.fromHtml(c.toString(),android.text.Html.FROM_HTML_MODE_LEGACY).toString();}Object c=part.getContent();if(c instanceof Multipart){Multipart mp=(Multipart)c;String html="";for(int i=0;i<mp.getCount();i++){Part child=mp.getBodyPart(i);if(Part.ATTACHMENT.equalsIgnoreCase(child.getDisposition()))continue;String result=body(child,depth+1);if(child.isMimeType("text/plain")&&!result.isEmpty())return result;if(html.isEmpty())html=result;}return html;}return "(Contenido no compatible o adjunto)";}
   void openMessage(String folder,int index){menu();content.addView(text("Abriendo mensaje…",16));work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f.getMessage(index);String from=sender(m),subject=decode(m.getSubject()),message=body(m,0),to=recipientList(m.getRecipients(Message.RecipientType.TO)),cc=recipientList(m.getRecipients(Message.RecipientType.CC)),bcc=recipientList(m.getRecipients(Message.RecipientType.BCC));show(()->{layout("Mensaje");content.addView(button("← Volver",()->openFolder(folder)));content.addView(text(subject,22));content.addView(text("De: "+from,15));content.addView(text("Para: "+to+"\nCC: "+cc+("—".equals(bcc)?"":"\nCCO: "+bcc),15));content.addView(text(message,16));content.addView(button("↩ Responder",()->compose(from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+subject,"\n\n--- Mensaje original ---\n"+message)));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+subject,"\n\n--- Mensaje reenviado ---\n"+message)));});}finally{f.close(false);}}finally{st.close();}});}
   void folders(){menu();content.addView(text("Cargando carpetas…",16));work(()->{Store st=connect();try{Folder[] fs=st.getDefaultFolder().list("*");ArrayList<String> names=new ArrayList<>();for(Folder f:fs)if((f.getType()&Folder.HOLDS_MESSAGES)!=0)names.add(f.getFullName());show(()->{menu();content.addView(text("Carpetas",20));for(String name:names)content.addView(button("📁 "+name,()->openFolder(name)));});}finally{st.close();}});}
-  void compose(String toValue,String subjectValue,String bodyValue){outgoingAttachments.clear();layout("Redactar");EditText to=input(content,"Destinatario",toValue,false),subject=input(content,"Asunto",subjectValue,false);EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setText(bodyValue);body.setMinLines(8);content.addView(body);LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
+  // Retrieve the live MIME headers for correct Reply-To, Reply-All and threading.
+  void prepareResponse(String folder,long uid,String mode){
+    MailCache.Item cached=cache.get(lastAccount,folder,uid);
+    if(cached==null)return;
+    if(!configured){error("Conecta con el servidor para responder con destinatarios correctos");return;}
+    work(()->{
+      Store store=connect();
+      try{
+        Folder f=store.getFolder(folder);f.open(Folder.READ_ONLY);
+        try{
+          Message original=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
+          if(original==null)throw new Exception("No se encuentra el mensaje original");
+          String subject=decode(original.getSubject());
+          String quoted=body(original,0);
+          String from=recipientList(original.getFrom());
+          String to=recipientList(original.getRecipients(Message.RecipientType.TO));
+          String cc=recipientList(original.getRecipients(Message.RecipientType.CC));
+          String stamp=original.getSentDate()==null?"":original.getSentDate().toString();
+          String messageId=original.getHeader("Message-ID",null);
+          String references=original.getHeader("References",null);
+          String toValue="",ccValue="";
+          if(!"forward".equals(mode)){
+            LinkedHashMap<String,InternetAddress> recipients=new LinkedHashMap<>();
+            addReplyAddresses(recipients,original.getReplyTo());
+            if("all".equals(mode)){
+              addReplyAddresses(recipients,original.getRecipients(Message.RecipientType.TO));
+              addReplyAddresses(recipients,original.getRecipients(Message.RecipientType.CC));
+            }
+            LinkedHashMap<String,InternetAddress> ccRecipients=new LinkedHashMap<>();
+            if("all".equals(mode)){
+              // Primary reply recipient stays in To; other original recipients remain visible in CC.
+              LinkedHashMap<String,InternetAddress> replyOnly=new LinkedHashMap<>();
+              addReplyAddresses(replyOnly,original.getReplyTo());
+              for(Map.Entry<String,InternetAddress> entry:recipients.entrySet())
+                if(!replyOnly.containsKey(entry.getKey()))ccRecipients.put(entry.getKey(),entry.getValue());
+              recipients=replyOnly;
+            }
+            toValue=joinAddresses(recipients);ccValue=joinAddresses(ccRecipients);
+          }
+          String quoteHeader="\n\n---------- Mensaje original ----------\nDe: "+from+"\nFecha: "+stamp+"\nPara: "+to+"\nCC: "+cc+"\nAsunto: "+subject+"\n\n";
+          String draft="\n\n"+quoteHeader+quoted;
+          String prefix="forward".equals(mode)?"Fwd: ":"Re: ";
+          String cleanSubject=subject.replaceFirst("(?i)^(re|fwd|fw):\\s*","");
+          final String finalTo=toValue,finalCc=ccValue,finalDraft=draft,finalSubject=prefix+cleanSubject;
+          final String finalId=messageId,finalRefs=references;
+          show(()->composeAdvanced(finalTo,finalCc,finalSubject,finalDraft,
+              "forward".equals(mode)?null:finalId,"forward".equals(mode)?null:finalRefs));
+        }finally{f.close(false);}
+      }finally{store.close();}
+    });
+  }
+  void addReplyAddresses(Map<String,InternetAddress> out,Address[] addresses){
+    if(addresses==null)return;
+    for(Address a:addresses)if(a instanceof InternetAddress){
+      InternetAddress ia=(InternetAddress)a;String addr=ia.getAddress();
+      if(addr!=null&&!addr.trim().isEmpty()&&!addr.equalsIgnoreCase(u))out.put(addr.toLowerCase(Locale.ROOT),ia);
+    }
+  }
+  String joinAddresses(Map<String,InternetAddress> addresses){
+    StringBuilder result=new StringBuilder();
+    for(InternetAddress ia:addresses.values()){
+      if(result.length()>0)result.append(", ");result.append(ia.toUnicodeString());
+    }return result.toString();
+  }
+  void compose(String toValue,String subjectValue,String bodyValue){
+    composeAdvanced(toValue,"",subjectValue,bodyValue,null,null);
+  }
+  void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references){outgoingAttachments.clear();layout("Redactar");EditText to=input(content,"Para",toValue,false),cc=input(content,"CC (copia)",ccValue,false),subject=input(content,"Asunto",subjectValue,false);EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setText(bodyValue);body.setMinLines(8);content.addView(body);LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
     for(String label:new String[]{"B","I","U"}){Button fmt=new Button(this);fmt.setText(label);formatBar.addView(fmt,new LinearLayout.LayoutParams(0,-2,1));fmt.setOnClickListener(v->styleSelection(body,label.equals("B")?1:label.equals("I")?2:3));}
-    content.addView(formatBar);content.addView(text("Selecciona texto y pulsa B, I o U para darle formato.",12));attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
+    content.addView(formatBar);content.addView(text("Selecciona texto y pulsa B, I o U para darle formato.",12));attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
       String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+signature);
       String formatted=android.text.Html.toHtml(body.getText(),android.text.Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL);
       String finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"</body></html>";

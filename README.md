@@ -1,10 +1,20 @@
-# CorreoPlus V1.1 Beta
+# CorreoPlus V1.1.1 Beta
 
-Basado en V1.0.9. Una sola cuenta.
+Proyecto Android de una sola cuenta basado en V1.1 Beta.
 
-- Caché y bandeja paginadas en bloques de 100 mensajes; hasta 500 cabeceras recientes por sincronización.
-- Búsqueda avanzada local por remitente, asunto, fecha desde y presencia de adjuntos.
-- Mover mensajes seleccionados a carpetas IMAP existentes.
-- Se mantienen HTML, adjuntos, acciones fijas y sincronización incremental por UID.
+## Novedades
+- Responder desde la barra inferior, con el mensaje original completo citado debajo de la respuesta.
+- Responder a todos desde «Más», con destinatarios Reply-To en Para y demás destinatarios originales en CC, sin duplicados ni la cuenta propia.
+- Reenviar con cabeceras del mensaje original y el cuerpo completo citado.
+- Campo CC editable en la redacción y envío SMTP.
+- Cabeceras In-Reply-To y References al responder.
+- Se conserva el editor de formato, adjuntos manuales, HTML, caché, filtros, acciones y sincronización.
 
-Limitaciones: la sincronización trae como máximo 500 cabeceras recientes por ejecución, no todo el histórico del servidor; la búsqueda por fecha filtra los resultados de la página recuperada, por lo que puede omitir coincidencias de páginas posteriores. No se ha verificado la compilación Android.
+## Limitaciones importantes
+- La cita del mensaje original usa la representación en texto del MIME original. Se envía una alternativa HTML generada a partir de ese texto, pero **no conserva exactamente el HTML original** (tablas, estilos e imágenes incrustadas).
+- El reenvío no adjunta automáticamente los archivos originales: hay que añadirlos manualmente.
+- La composición de respuesta requiere conexión IMAP para consultar las cabeceras y el contenido originales.
+- No se ha compilado ni probado el APK en Android en este entorno. Comprobar GitHub Actions antes de instalar.
+
+## Instalación
+Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y descargar APK del workflow de GitHub Actions.

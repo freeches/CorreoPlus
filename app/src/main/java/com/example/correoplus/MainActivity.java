@@ -172,7 +172,34 @@ public class MainActivity extends Activity {
   }}
   void settings(){layout("Cuentas");
   CheckBox notices=new CheckBox(this);notices.setText("Notificaciones y sincronización periódica (mínimo 15 minutos)");notices.setTextColor(foreground());notices.setChecked(prefs.getBoolean("background_sync",false));content.addView(notices);notices.setOnCheckedChangeListener((v,enabled)->{prefs.edit().putBoolean("background_sync",enabled).apply();MailBackground.schedule(this);});
+  CheckBox wifiOnly=new CheckBox(this);wifiOnly.setText("Sincronizar en segundo plano solo con Wi-Fi o red sin límite de datos");wifiOnly.setTextColor(foreground());wifiOnly.setChecked(prefs.getBoolean("sync_wifi_only",false));content.addView(wifiOnly);
+  wifiOnly.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("sync_wifi_only",checked).apply();MailBackground.schedule(this);});
+  CheckBox batteryGuard=new CheckBox(this);batteryGuard.setText("Evitar sincronización automática cuando quede poca batería");batteryGuard.setTextColor(foreground());batteryGuard.setChecked(prefs.getBoolean("sync_battery_guard",true));content.addView(batteryGuard);
+  batteryGuard.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("sync_battery_guard",checked).apply();MailBackground.schedule(this);});
+  content.addView(text("Última comprobación automática: "+prefs.getString("background_last_status","Todavía no realizada"),13));
+  long lastAttempt=prefs.getLong("background_last_attempt",0),lastSuccess=prefs.getLong("background_last_success",0),lastFailure=prefs.getLong("background_last_failure",0);
+  java.text.DateFormat syncDate=java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT,java.text.DateFormat.SHORT);
+  content.addView(text("Último intento: "+(lastAttempt==0?"Nunca":syncDate.format(new java.util.Date(lastAttempt))),13));
+  content.addView(text("Última comprobación correcta: "+(lastSuccess==0?"Nunca":syncDate.format(new java.util.Date(lastSuccess))),13));
+  if(lastFailure>lastSuccess)content.addView(text("Último fallo: "+syncDate.format(new java.util.Date(lastFailure)),13));
+
   content.addView(button("📊 Estado y diagnóstico IMAP",()->syncDiagnostics()));
+  content.addView(text("CorreoPlus 2.0 · Personalización",19));
+  content.addView(text("Densidad de bandeja",14));
+  RadioGroup densityGroup=new RadioGroup(this);
+  String[] densityNames={"Compacta","Normal","Cómoda"};
+  int savedDensity=prefs.getInt("inbox_density",1);
+  for(int i=0;i<densityNames.length;i++){final int value=i;RadioButton rb=new RadioButton(this);rb.setText(densityNames[i]);rb.setTextColor(foreground());densityGroup.addView(rb);if(savedDensity==i)rb.setChecked(true);rb.setOnClickListener(v->prefs.edit().putInt("inbox_density",value).apply());}
+  content.addView(densityGroup);
+  CheckBox avatars=new CheckBox(this);avatars.setText("Mostrar avatares con iniciales del remitente");avatars.setTextColor(foreground());avatars.setChecked(prefs.getBoolean("inbox_avatars",true));content.addView(avatars);
+  avatars.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("inbox_avatars",checked).apply());
+  content.addView(text("Deslizamiento hacia la izquierda",14));
+  RadioGroup leftGroup=new RadioGroup(this);String[] swipeNames={"Eliminar","Archivar"};
+  for(int i=0;i<2;i++){final int value=i;RadioButton rb=new RadioButton(this);rb.setText(swipeNames[i]);rb.setTextColor(foreground());leftGroup.addView(rb);if(prefs.getInt("swipe_left",0)==i)rb.setChecked(true);rb.setOnClickListener(v->prefs.edit().putInt("swipe_left",value).apply());}content.addView(leftGroup);
+  content.addView(text("Deslizamiento hacia la derecha",14));
+  RadioGroup rightGroup=new RadioGroup(this);
+  for(int i=0;i<2;i++){final int value=i;RadioButton rb=new RadioButton(this);rb.setText(swipeNames[i]);rb.setTextColor(foreground());rightGroup.addView(rb);if(prefs.getInt("swipe_right",1)==i)rb.setChecked(true);rb.setOnClickListener(v->prefs.edit().putInt("swipe_right",value).apply());}content.addView(rightGroup);
+  content.addView(text("Los cambios de bandeja se aplican al volver a abrir la carpeta.",12));
   content.addView(text("Preferencias",19));
   CheckBox dark=new CheckBox(this);dark.setText("Modo oscuro");dark.setTextColor(foreground());dark.setChecked(darkMode);
   content.addView(dark);dark.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("dark_mode",checked).apply();darkMode=checked;settings();});
@@ -402,14 +429,23 @@ public class MainActivity extends Activity {
       if(inboxFilter==3 && r.attachmentState!=1)continue;
       LinearLayout item=new LinearLayout(this);
       item.setOrientation(LinearLayout.VERTICAL);
-      item.setPadding(18,14,18,14);
+      int density=prefs.getInt("inbox_density",1);
+      int verticalPadding=density==0?5:density==2?23:14;
+      item.setPadding(18,verticalPadding,18,verticalPadding);
       item.setBackgroundColor(selectedUids.contains(r.uid)?(darkMode?Color.rgb(52,78,110):Color.rgb(211,232,249)):(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252)));
       String senderLabel=senderDisplay(r.from);
       String prefix=selectionMode?(selectedUids.contains(r.uid)?"☑ ":"☐ "):"";
       TextView senderView=text(prefix+(r.seen?"":"● ")+senderLabel,16);
       senderView.setSingleLine(true);senderView.setEllipsize(TextUtils.TruncateAt.END);
       senderView.setTypeface(null,r.seen?Typeface.NORMAL:Typeface.BOLD);
-      item.addView(senderView);
+      if(prefs.getBoolean("inbox_avatars",true)){
+        LinearLayout senderRow=new LinearLayout(this);senderRow.setOrientation(LinearLayout.HORIZONTAL);senderRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView avatarIcon=text(senderLabel.isEmpty()?"?":senderLabel.substring(0,1).toUpperCase(Locale.getDefault()),16);
+        avatarIcon.setGravity(android.view.Gravity.CENTER);avatarIcon.setTextColor(Color.WHITE);avatarIcon.setBackgroundColor(blue);
+        int avatarSize=(int)(34*getResources().getDisplayMetrics().density);
+        LinearLayout.LayoutParams avatarParams=new LinearLayout.LayoutParams(avatarSize,avatarSize);avatarParams.rightMargin=12;
+        senderRow.addView(avatarIcon,avatarParams);senderRow.addView(senderView,new LinearLayout.LayoutParams(0,-2,1));item.addView(senderRow);
+      }else item.addView(senderView);
       LinearLayout subjectRow=new LinearLayout(this);subjectRow.setOrientation(LinearLayout.HORIZONTAL);
       TextView subjectView=text((isFavorite(folder,r.uid)?"★ ":"")+(r.attachmentState==1?"📎 ":"")+(r.subject==null?"(Sin asunto)":r.subject),14);
       subjectView.setSingleLine(true);subjectView.setEllipsize(TextUtils.TruncateAt.END);
@@ -435,7 +471,7 @@ public class MainActivity extends Activity {
         if(action==MotionEvent.ACTION_CANCEL){ui.removeCallbacks(longPress);return true;}
         if(action==MotionEvent.ACTION_UP){ui.removeCallbacks(longPress);if(longPressed[0])return true;
           float dx=event.getX()-down[0],dy=event.getY()-down[1];
-          if(!selectionMode&&Math.abs(dx)>threshold&&Math.abs(dx)>Math.abs(dy)*1.3f){confirmMove(folder,r.uid,dx<0);return true;}
+          if(!selectionMode&&Math.abs(dx)>threshold&&Math.abs(dx)>Math.abs(dy)*1.3f){confirmMove(folder,r.uid,prefs.getInt(dx<0?"swipe_left":"swipe_right",dx<0?0:1)==0);return true;}
           if(Math.abs(dx)<20*getResources().getDisplayMetrics().density&&Math.abs(dy)<20*getResources().getDisplayMetrics().density){
             if(selectionMode){if(!selectedUids.add(r.uid))selectedUids.remove(r.uid);renderSearch(target,folder,query);}else openCachedMessage(folder,r.uid);
           }return true;

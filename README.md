@@ -1,18 +1,17 @@
-# CorreoPlus V1.2 Beta — Motor de sincronización (primera entrega)
+# CorreoPlus V2.0 Beta — Primera entrega directa
 
-Base: V1.1.8 Beta. Una sola cuenta.
+Base: V1.2.2 confirmada funcional. Una sola cuenta.
 
-## Cambios implementados
-- Progreso visible por carpeta, actualizado cada 10 mensajes procesados.
-- Persistencia del último estado de sincronización en preferencias.
-- Guardado incremental de cabeceras en lotes de 10 para reducir pérdidas tras cortes.
-- Reintentos solo para errores de conexión transitorios (hasta 3).
-- Diagnóstico IMAP consultable y copiable sin credenciales ni texto de mensajes.
-- Actualización de estado leído/no leído desde servidor para la ventana sincronizada.
-- Caché y lectura HTML de V1.1.8 conservadas.
+## Implementado en esta entrega
+- Densidad de bandeja configurable: compacta, normal o cómoda.
+- Avatares locales con inicial del remitente (activables).
+- Gestos de deslizamiento configurables de forma independiente para izquierda y derecha: archivar o eliminar.
+- Preferencias persistentes sin cambiar el esquema de la caché ni las credenciales.
+- Se mantienen el lector HTML, barra inferior, respuestas, adjuntos y motor IMAP de V1.2.2.
 
-## Pendiente para completar las 7 funciones del bloque de sincronización
-IMAP IDLE real, cola offline de acciones, reconciliación completa de movimientos/borrados entre dispositivos y optimización de segundo plano. No se anuncian como implementadas.
+## Pendiente de las 24 funciones aprobadas
+Esta versión es la **primera beta etiquetada V2.0**, NO implementa las 24 funciones.
+Siguen pendientes IMAP IDLE, cola offline, reconciliación remota completa, editor HTML avanzado, firmas múltiples, borradores automáticos, reenvío con todos los adjuntos, contactos, autocompletado, búsquedas guardadas, búsqueda de cuerpo completa, seguridad antiphishing, bloqueo de rastreadores avanzado, temas de color y barra personalizable, entre otras.
 
-## Validación
-ZIP verificado; compilación Android pendiente de GitHub Actions.
+## Verificación
+Integridad ZIP comprobada. Compilación Android y prueba funcional pendientes en GitHub Actions.

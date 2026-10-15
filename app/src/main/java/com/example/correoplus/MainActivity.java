@@ -1057,12 +1057,54 @@ public class MainActivity extends Activity {
         .setNegativeButton("Cancelar",null).show();
     });
   }
+  // Address book is local to the configured account; no Android contacts permission needed.
+  String contactsKey(){return "contacts_v202_"+lastAccount;}
+  TreeSet<String> savedContacts(){return new TreeSet<>(prefs.getStringSet(contactsKey(),new HashSet<String>()));}
+  void rememberRecipients(String addresses){
+    TreeSet<String> all=savedContacts();
+    try{for(InternetAddress a:InternetAddress.parse(addresses,false)){
+      String email=a.getAddress();if(email!=null&&email.contains("@"))all.add(email.trim().toLowerCase(java.util.Locale.ROOT));
+    }}catch(Exception ignored){}
+    prefs.edit().putStringSet(contactsKey(),new HashSet<>(all)).apply();
+  }
+  void editAddressBook(EditText recipient){
+    final TreeSet<String> entries=savedContacts();
+    LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);panel.setPadding(24,8,24,8);
+    EditText address=new EditText(this);address.setSingleLine(true);address.setHint("correo@ejemplo.com");address.setInputType(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);panel.addView(address);
+    TextView caption=text("Añade una dirección o selecciónala de la lista para usarla.",13);panel.addView(caption);
+    ScrollView scroll=new ScrollView(this);LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);scroll.addView(list);panel.addView(scroll,new LinearLayout.LayoutParams(-1,350));
+    AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Agenda local").setView(panel).setNegativeButton("Cerrar",null).create();
+    Runnable refresh=()->{list.removeAllViews();for(String email:entries){
+      LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
+      TextView item=text(email,14);row.addView(item,new LinearLayout.LayoutParams(0,-2,1));
+      item.setOnClickListener(v->{String current=recipient.getText().toString().trim();recipient.setText(current.isEmpty()?email:current.replaceAll("[,; ]+$","")+", "+email);dialog.dismiss();});
+      Button remove=new Button(this);remove.setText("×");row.addView(remove);remove.setOnClickListener(v->{entries.remove(email);prefs.edit().putStringSet(contactsKey(),new HashSet<>(entries)).apply();list.removeView(row);});
+      list.addView(row);
+    }};
+    Button add=new Button(this);add.setText("Añadir contacto");panel.addView(add);add.setOnClickListener(v->{String email=address.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);if(!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()){error("Dirección de correo no válida");return;}entries.add(email);prefs.edit().putStringSet(contactsKey(),new HashSet<>(entries)).apply();address.setText("");refresh.run();});
+    refresh.run();dialog.show();
+  }
+  void enableRecipientAutocomplete(EditText editor){
+    // Non-invasive suggestions: autocomplete on tap, without altering existing recipient fields.
+    editor.setOnFocusChangeListener((v,focused)->{if(!focused)return;
+      TreeSet<String> entries=savedContacts();if(entries.isEmpty())return;
+      String typed=editor.getText().toString();String prefix=typed.substring(Math.max(typed.lastIndexOf(','),typed.lastIndexOf(';'))+1).trim().toLowerCase(java.util.Locale.ROOT);
+      if(prefix.length()<2)return;
+      ArrayList<String> matches=new ArrayList<>();for(String e:entries)if(e.contains(prefix))matches.add(e);
+      if(matches.isEmpty())return;
+      new AlertDialog.Builder(this).setTitle("Destinatarios sugeridos").setItems(matches.toArray(new String[0]),(d,which)->{
+        int split=Math.max(typed.lastIndexOf(','),typed.lastIndexOf(';'));editor.setText((split<0?"":typed.substring(0,split+1)+" ")+matches.get(which));editor.setSelection(editor.length());
+      }).setNegativeButton("Cancelar",null).show();
+    });
+  }
   void compose(String toValue,String subjectValue,String bodyValue){
     composeAdvanced(toValue,"",subjectValue,bodyValue,null,null,null,null,new ArrayList<InlineImage>());
   }
   void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references,String quotedHtml,String quoteHeader,ArrayList<InlineImage> quotedImages){
     outgoingAttachments.clear();layout("Redactar");
     EditText to=input(content,"Para",toValue,false),cc=input(content,"CC (copia)",ccValue,false),subject=input(content,"Asunto",subjectValue,false);
+    enableRecipientAutocomplete(to);enableRecipientAutocomplete(cc);
+    content.addView(button("👥 Agenda de contactos",()->editAddressBook(to)));
     boolean initialHtml=prefs.getBoolean("default_html",false);
     CheckBox htmlMode=new CheckBox(this);htmlMode.setText("Redactar en HTML (editor con formato)");htmlMode.setChecked(initialHtml);content.addView(htmlMode);
     EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setMinLines(8);
@@ -1142,6 +1184,6 @@ public class MainActivity extends Activity {
           multi.addBodyPart(attachment);
         }m.setContent(multi);
       }
-      Transport.send(m);prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply();show(()->{new AlertDialog.Builder(this).setMessage("Mensaje enviado").setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
+      Transport.send(m);rememberRecipients(dest);rememberRecipients(ccText);prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply();show(()->{new AlertDialog.Builder(this).setMessage("Mensaje enviado").setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
   @Override public void onBackPressed(){renderCached(folderName);}
 }

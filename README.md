@@ -32,3 +32,10 @@ Compilación Android no verificada en este entorno.
 - Tres órdenes de accesos rápidos disponibles, guardados localmente.
 - Carpetas y Cuenta permanecen accesibles.
 - Compilación Android pendiente de verificar en GitHub Actions.
+
+
+## 2.0.2 Beta
+- Agenda local de direcciones por cuenta, con añadir, seleccionar y eliminar.
+- Registro automático de destinatarios al enviar correctamente un mensaje.
+- Sugerencias de destinatarios guardados al enfocar Para o CC cuando hay texto parcial.
+- Sin permiso de lectura de contactos del teléfono ni subida de la agenda.

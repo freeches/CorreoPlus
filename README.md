@@ -1,5 +1,10 @@
-# CorreoPlus V0.8.1
+# CorreoPlus V0.8.2 — Indicadores de adjuntos
 
-Adjuntos visibles encima del cuerpo del mensaje, tamaños en KB, apertura directa mediante FileProvider y opción de guardar. Requiere conexión IMAP para cargar adjuntos. Mantiene una sola cuenta.
+- Muestra 📎 en la lista de correos cuando la estructura MIME contiene adjuntos.
+- Filtro «📎 Adjuntos» y compatibilidad con búsqueda local.
+- Actualización de caché SQLite de versión 1 a 2 sin borrar mensajes.
+- Los mensajes antiguos pueden no tener todavía el indicador: se detectan al abrirlos o al volver a descargarlos; el filtro solo incluye los adjuntos confirmados.
+- Durante la sincronización se inspecciona la estructura MIME de los mensajes nuevos, lo que puede aumentar el tráfico IMAP.
+- Conserva una sola cuenta y las funciones anteriores.
 
-Sube los archivos con MGit y compila mediante GitHub Actions. Esta versión no se ha compilado localmente.
+Compilar mediante GitHub Actions y comprobar en el móvil; no se ha validado una compilación local.

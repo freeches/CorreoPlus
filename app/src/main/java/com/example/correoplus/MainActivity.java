@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
     work(()->{Store st=connect();try{Folder f=st.getFolder(folder);try{f.open(Folder.READ_ONLY);
       Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
       if(m==null)throw new Exception("El mensaje ya no está disponible en el servidor");
-      ArrayList<AttachmentInfo> attachments=new ArrayList<>();collectAttachments(m,attachments,0);
+      ArrayList<AttachmentInfo> attachments=new ArrayList<>();collectAttachments(m,attachments,0);cache.updateAttachments(lastAccount,folder,uid,!attachments.isEmpty());
       show(()->{if(receivedAttachments!=target)return;target.removeAllViews();if(!attachments.isEmpty()){
         target.addView(text("📎 Adjuntos ("+attachments.size()+")",18));
         for(AttachmentInfo a:attachments){target.addView(button("📄 "+a.name+" · "+sizeKB(a.size)+"   Abrir",()->openAttachment(folder,uid,a.index,a.name)));
@@ -206,7 +206,10 @@ public class MainActivity extends Activity {
           MailCache.Item existing=uid<=lastUid?cache.get(lastAccount,folder,uid):null;
           boolean seen=m.isSet(Flags.Flag.SEEN);
           if(existing!=null){if(existing.seen!=seen)cache.updateSeen(lastAccount,folder,validity,uid,seen);}
-          else{Date d=m.getSentDate();batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null));}
+          else{Date d=m.getSentDate();int attachmentState=-1;
+            try{ArrayList<AttachmentInfo> found=new ArrayList<>();collectAttachments(m,found,0);attachmentState=found.isEmpty()?0:1;}
+            catch(Exception inspectionError){if(temporaryImapFailure(inspectionError))throw inspectionError;}
+            batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null,attachmentState));}
         }
         cache.saveHeaders(lastAccount,folder,validity,batch);
         ArrayList<MailCache.Item> recent=cache.list(lastAccount,folder);
@@ -261,7 +264,8 @@ public class MainActivity extends Activity {
     filters.addView(button("Todos",()->{inboxFilter=0;renderCached(folder);}));
     filters.addView(button("No leídos",()->{inboxFilter=1;renderCached(folder);}));
     filters.addView(button("★ Favoritos",()->{inboxFilter=2;renderCached(folder);}));
-    content.addView(text("Filtro: "+(inboxFilter==1?"No leídos":inboxFilter==2?"Favoritos":"Todos"),12));
+    filters.addView(button("📎 Adjuntos",()->{inboxFilter=3;renderCached(folder);}));
+    content.addView(text("Filtro: "+(inboxFilter==1?"No leídos":inboxFilter==2?"Favoritos":inboxFilter==3?"Con adjuntos":"Todos"),12));
     EditText search=input(content,"Buscar remitente, asunto o contenido (caché)","",false);
     LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
     search.addTextChangedListener(new android.text.TextWatcher(){
@@ -284,7 +288,8 @@ public class MainActivity extends Activity {
     for(MailCache.Item r:rows){
       if(inboxFilter==1 && r.seen)continue;
       if(inboxFilter==2 && !isFavorite(folder,r.uid))continue;
-      TextView item=text((isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);
+      if(inboxFilter==3 && r.attachmentState!=1)continue;
+      TextView item=text((isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+(r.attachmentState==1?"📎 ":"")+r.from+"\n"+r.subject+"\n"+r.date,15);
       item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));
       LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
       target.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));

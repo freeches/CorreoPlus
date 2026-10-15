@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
   MailCache cache; String lastAccount=""; SharedPreferences prefs;
   LinearLayout root, content, toolbar; EditText host, port, user, pass, smtpHost, smtpPort;
   String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX"; int inboxFilter=0; int pageOffset=0; String advancedSender="", advancedSubject="", advancedAfter=""; boolean advancedAttachments=false;
-  final int navy=Color.rgb(17,43,74), blue=Color.rgb(0,105,185);
+  final int navy=Color.rgb(17,43,74); int blue=Color.rgb(0,105,185);
   boolean darkMode=false;
   final LinkedHashSet<Long> selectedUids=new LinkedHashSet<>();
   boolean selectionMode=false;
@@ -151,6 +151,17 @@ public class MainActivity extends Activity {
   }
 
   final java.util.concurrent.atomic.AtomicBoolean syncing=new java.util.concurrent.atomic.AtomicBoolean(false);
+  int accentColor(int choice){switch(choice){case 1:return Color.rgb(0,128,105);case 2:return Color.rgb(125,65,180);case 3:return Color.rgb(186,75,35);default:return Color.rgb(0,105,185);}}
+  void confirmExternalLink(Uri uri){
+    String scheme=uri.getScheme();if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme)&&!"mailto".equalsIgnoreCase(scheme))return;
+    String host=uri.getHost();String address=uri.toString();
+    boolean insecure="http".equalsIgnoreCase(scheme);
+    boolean suspicious=insecure || (host!=null&&(host.contains("xn--")||host.matches(".*\\d+\\.\\d+\\.\\d+\\.\\d+.*"))) || address.contains("@");
+    String warning=suspicious?"⚠ Este enlace presenta señales de riesgo. Verifica el destino antes de continuar.\n\n":"";
+    new AlertDialog.Builder(this).setTitle(suspicious?"Enlace potencialmente sospechoso":"Abrir enlace externo")
+      .setMessage(warning+address).setNegativeButton("Cancelar",null)
+      .setPositiveButton("Abrir",(d,w)->{try{startActivity(new Intent(Intent.ACTION_VIEW,uri));}catch(Exception e){error("No se pudo abrir el enlace");}}).show();
+  }
   int foreground(){return darkMode?Color.WHITE:navy;}
   int background(){return darkMode?Color.rgb(24,30,39):Color.WHITE;}
   interface Task { void run() throws Exception; }
@@ -160,7 +171,7 @@ public class MainActivity extends Activity {
   Button button(String name,Runnable run){Button b=new Button(this);b.setText(name);b.setAllCaps(false);b.setOnClickListener(v->run.run());return b;}
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
   void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));}
-  @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
+  @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);blue=accentColor(prefs.getInt("accent_color",0));lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
     h=prefs.getString("imap_host",""); u=prefs.getString("username","");
     sh=prefs.getString("smtp_host","");
     try { imapPort=Integer.parseInt(prefs.getString("imap_port","993")); sPort=Integer.parseInt(prefs.getString("smtp_port","587")); }
@@ -200,6 +211,21 @@ public class MainActivity extends Activity {
   RadioGroup rightGroup=new RadioGroup(this);
   for(int i=0;i<2;i++){final int value=i;RadioButton rb=new RadioButton(this);rb.setText(swipeNames[i]);rb.setTextColor(foreground());rightGroup.addView(rb);if(prefs.getInt("swipe_right",1)==i)rb.setChecked(true);rb.setOnClickListener(v->prefs.edit().putInt("swipe_right",value).apply());}content.addView(rightGroup);
   content.addView(text("Los cambios de bandeja se aplican al volver a abrir la carpeta.",12));
+  content.addView(text("Color de acento",16));
+  RadioGroup accentGroup=new RadioGroup(this);String[] accentNames={"Azul clásico","Verde","Violeta","Naranja"};
+  for(int i=0;i<accentNames.length;i++){final int colorChoice=i;RadioButton option=new RadioButton(this);option.setText(accentNames[i]);option.setTextColor(foreground());accentGroup.addView(option);if(prefs.getInt("accent_color",0)==i)option.setChecked(true);option.setOnClickListener(v->{prefs.edit().putInt("accent_color",colorChoice).apply();blue=accentColor(colorChoice);error("Color guardado. Se aplicará al abrir de nuevo la bandeja.");});}
+  content.addView(accentGroup);
+  content.addView(text("Accesos rápidos de la barra",16));
+  content.addView(text("Selecciona qué accesos mostrar y su orden. Carpetas y Cuenta siempre estarán disponibles.",12));
+  CheckBox quickInbox=new CheckBox(this);quickInbox.setText("Mostrar acceso rápido a Bandeja de entrada");quickInbox.setTextColor(foreground());quickInbox.setChecked(prefs.getBoolean("quick_inbox",true));content.addView(quickInbox);
+  quickInbox.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("quick_inbox",checked).apply());
+  CheckBox quickSync=new CheckBox(this);quickSync.setText("Mostrar acceso rápido a Diagnóstico");quickSync.setTextColor(foreground());quickSync.setChecked(prefs.getBoolean("quick_diagnostics",false));content.addView(quickSync);
+  quickSync.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("quick_diagnostics",checked).apply());
+  CheckBox quickCompose=new CheckBox(this);quickCompose.setText("Mostrar Redactar en accesos rápidos");quickCompose.setTextColor(foreground());quickCompose.setChecked(prefs.getBoolean("quick_compose",true));content.addView(quickCompose);
+  quickCompose.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("quick_compose",checked).apply());
+  content.addView(text("Orden de accesos rápidos",14));
+  RadioGroup quickOrder=new RadioGroup(this);String[] quickOrders={"Carpetas primero","Redactar primero","Bandeja primero"};
+  for(int i=0;i<quickOrders.length;i++){final int index=i;RadioButton option=new RadioButton(this);option.setText(quickOrders[i]);option.setTextColor(foreground());quickOrder.addView(option);if(prefs.getInt("quick_order",0)==i)option.setChecked(true);option.setOnClickListener(v->prefs.edit().putInt("quick_order",index).apply());}content.addView(quickOrder);
   content.addView(text("Preferencias",19));
   CheckBox dark=new CheckBox(this);dark.setText("Modo oscuro");dark.setTextColor(foreground());dark.setChecked(darkMode);
   content.addView(dark);dark.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("dark_mode",checked).apply();darkMode=checked;settings();});
@@ -226,7 +252,19 @@ public class MainActivity extends Activity {
   Store connect()throws Exception{Session s=Session.getInstance(imapProperties());Store st=s.getStore(imapPort==993?"imaps":"imap");st.connect(h,imapPort,u,pw);return st;}
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
-  void menu(){layout("Correo");content.addView(button("☰ Carpetas",()->folders()));content.addView(button("⚙ Cuenta",()->settings()));content.addView(button("✎ Redactar",()->compose("","","")));}
+  void menu(){
+    layout("Correo");
+    int order=prefs.getInt("quick_order",0);
+    if(order==1)quickComposeButton();
+    if(order==2)quickInboxButton();
+    content.addView(button("☰ Carpetas",()->folders()));
+    if(order!=2)quickInboxButton();
+    if(order!=1)quickComposeButton();
+    if(prefs.getBoolean("quick_diagnostics",false))content.addView(button("📊 Diagnóstico",()->syncDiagnostics()));
+    content.addView(button("⚙ Cuenta",()->settings()));
+  }
+  void quickInboxButton(){if(prefs.getBoolean("quick_inbox",true))content.addView(button("📥 Bandeja",()->openFolder("INBOX")));}
+  void quickComposeButton(){if(prefs.getBoolean("quick_compose",true))content.addView(button("✎ Redactar",()->compose("","","")));}
   boolean temporaryImapFailure(Throwable e){
     for(Throwable t=e;t!=null;t=t.getCause()){
       if(t instanceof java.net.SocketException || t instanceof java.net.SocketTimeoutException ||
@@ -636,7 +674,7 @@ public class MainActivity extends Activity {
               if(!req.isForMainFrame()||!req.hasGesture())return true;
               String scheme=req.getUrl().getScheme();
               if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme)&&!"mailto".equalsIgnoreCase(scheme))return true;
-              try{startActivity(new Intent(Intent.ACTION_VIEW,req.getUrl()));}catch(Exception ignored){}return true;
+              show(()->confirmExternalLink(req.getUrl()));return true;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
               String scheme=req.getUrl().getScheme();

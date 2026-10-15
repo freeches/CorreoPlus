@@ -2,7 +2,7 @@ plugins { id("com.android.application") }
 android {
     namespace = "com.example.correoplus"
     compileSdk = 35
-    defaultConfig { applicationId = "com.example.correoplus"; minSdk = 26; targetSdk = 28; versionCode = 24; versionName = "2.0-expanded-beta" }
+    defaultConfig { applicationId = "com.example.correoplus"; minSdk = 26; targetSdk = 28; versionCode = 25; versionName = "2.0.1-beta" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources { excludes += "META-INF/LICENSE.md"; excludes += "META-INF/NOTICE.md" } }
 }

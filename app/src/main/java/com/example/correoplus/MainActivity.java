@@ -155,7 +155,7 @@ public class MainActivity extends Activity {
   Button button(String name,Runnable run){Button b=new Button(this);b.setText(name);b.setAllCaps(false);b.setOnClickListener(v->run.run());return b;}
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
   void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc);}
-  @Override public void onCreate(Bundle b){super.onCreate(b);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
+  @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
     h=prefs.getString("imap_host",""); u=prefs.getString("username","");
     sh=prefs.getString("smtp_host","");
     try { imapPort=Integer.parseInt(prefs.getString("imap_port","993")); sPort=Integer.parseInt(prefs.getString("smtp_port","587")); }
@@ -166,6 +166,7 @@ public class MainActivity extends Activity {
     if(configured) openFolder("INBOX");
   }}
   void settings(){layout("Cuentas");
+  CheckBox notices=new CheckBox(this);notices.setText("Notificaciones y sincronización periódica (mínimo 15 minutos)");notices.setTextColor(foreground());notices.setChecked(prefs.getBoolean("background_sync",false));content.addView(notices);notices.setOnCheckedChangeListener((v,enabled)->{prefs.edit().putBoolean("background_sync",enabled).apply();MailBackground.schedule(this);});
   content.addView(text("Preferencias",19));
   CheckBox dark=new CheckBox(this);dark.setText("Modo oscuro");dark.setTextColor(foreground());dark.setChecked(darkMode);
   content.addView(dark);dark.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("dark_mode",checked).apply();darkMode=checked;settings();});
@@ -358,7 +359,29 @@ public class MainActivity extends Activity {
   String htmlEscape(String value){return android.text.TextUtils.htmlEncode(value).replace("\n","<br>");}
   void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));content.addView(text("De: "+cached.from,15));
     content.addView(button(isFavorite(folder,uid)?"★ Quitar de favoritos":"☆ Añadir a favoritos",()->toggleFavorite(folder,uid)));
+    if(configured){content.addView(button("▣ Archivar",()->confirmMove(folder,uid,false)));content.addView(button("🗑 Eliminar",()->confirmMove(folder,uid,true)));}
     receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
+  void confirmMove(String folder,long uid,boolean delete){
+    new AlertDialog.Builder(this).setTitle(delete?"Mover a Papelera":"Archivar mensaje")
+      .setMessage("Esta operación moverá el mensaje en el servidor IMAP. ¿Continuar?")
+      .setNegativeButton("Cancelar",null).setPositiveButton("Continuar",(dialog,which)->moveMessage(folder,uid,delete)).show();
+  }
+  void moveMessage(String folder,long uid,boolean delete){
+    work(()->{Store st=connect();try{
+      Folder source=st.getFolder(folder);source.open(Folder.READ_WRITE);
+      try{Message message=source instanceof IMAPFolder?((IMAPFolder)source).getMessageByUID(uid):null;
+        if(message==null)throw new Exception("El mensaje ya no está en el servidor");
+        String[] targets=delete?new String[]{"Trash","INBOX.Trash","Deleted Items","Papelera"}:new String[]{"Archive","INBOX.Archive","Archives","Archivo"};
+        Folder target=null;for(String name:targets){Folder candidate=st.getFolder(name);if(candidate.exists()){target=candidate;break;}}
+        if(target==null)throw new Exception("No se encontró la carpeta de destino. No se ha movido el mensaje.");
+        source.copyMessages(new Message[]{message},target);
+        message.setFlag(Flags.Flag.DELETED,true);
+        source.close(true);
+        cache.remove(lastAccount,folder,uid);
+        show(()->{Toast.makeText(this,delete?"Movido a Papelera":"Archivado",Toast.LENGTH_SHORT).show();renderCached(folder);});
+      }finally{if(source.isOpen())source.close(false);}
+    }finally{st.close();}});
+  }
   void fetchBody(String folder,long uid){work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;if(m==null)throw new Exception("Mensaje no disponible en el servidor");String bodyText=body(m,0);cache.saveBody(lastAccount,folder,uid,bodyText);show(()->openCachedMessage(folder,uid));}finally{f.close(false);}}finally{st.close();}});}
 
   void renderMessages(String folder,int total,ArrayList<String[]> rows){menu();content.addView(text(folder+" · "+total+" mensajes",19));content.addView(button("↻ Actualizar",()->openFolder(folder)));for(String[] r:rows){TextView item=text(r[4]+r[1]+"\n"+r[2]+"\n"+r[3],15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openMessage(folder,Integer.parseInt(r[0])));}}

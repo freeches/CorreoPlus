@@ -173,6 +173,12 @@ public class MainActivity extends Activity {
   content.addView(text("Preferencias",19));
   CheckBox dark=new CheckBox(this);dark.setText("Modo oscuro");dark.setTextColor(foreground());dark.setChecked(darkMode);
   content.addView(dark);dark.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("dark_mode",checked).apply();darkMode=checked;settings();});
+  CheckBox defaultHtml=new CheckBox(this);
+  defaultHtml.setText("Ver mensajes en HTML por defecto (desmarcado: texto plano)");
+  defaultHtml.setTextColor(foreground());
+  defaultHtml.setChecked(prefs.getBoolean("default_html",false));
+  content.addView(defaultHtml);
+  defaultHtml.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("default_html",checked).apply());
   content.addView(text("Firma automática (se añade al enviar)",14));
   EditText signature=input(content,"Tu firma",prefs.getString("signature",""),false);
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
@@ -494,23 +500,23 @@ public class MainActivity extends Activity {
               return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
             }
           });
-          // The HTML WebView is inside the message's scrolling content. Measure its
-          // document height to allow the outer ScrollView to reach the full message.
+          // A fixed-height WebView scrolls its own HTML document. Do not resize it
+          // to document height: long quoted threads otherwise get cut off.
           view.getSettings().setDefaultTextEncodingName("UTF-8");
-          view.setWebChromeClient(new android.webkit.WebChromeClient(){
-            @Override public void onProgressChanged(WebView v,int progress){
-              if(progress==100){
-                v.evaluateJavascript("Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)",height->{
-                  if(slot!=messageBodySlot||v.getParent()!=slot)return;
-                  try{double cssHeight=Double.parseDouble(height.replace("\"",""));
-                    int px=(int)Math.min(200000,Math.max(240,cssHeight*getResources().getDisplayMetrics().density));
-                    v.setLayoutParams(new LinearLayout.LayoutParams(-1,px));
-                  }catch(Exception ignored){}
-                });
-              }
+          view.setVerticalScrollBarEnabled(true);
+          view.setNestedScrollingEnabled(true);
+          view.setOnTouchListener((v,event)->{
+            if(event.getActionMasked()==android.view.MotionEvent.ACTION_DOWN ||
+               event.getActionMasked()==android.view.MotionEvent.ACTION_MOVE){
+              v.getParent().requestDisallowInterceptTouchEvent(true);
+            }else if(event.getActionMasked()==android.view.MotionEvent.ACTION_UP ||
+                     event.getActionMasked()==android.view.MotionEvent.ACTION_CANCEL){
+              v.getParent().requestDisallowInterceptTouchEvent(false);
             }
+            return false;
           });
-          slot.addView(view,new LinearLayout.LayoutParams(-1,(int)(400*getResources().getDisplayMetrics().density)));
+          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.64f);
+          slot.addView(view,new LinearLayout.LayoutParams(-1,Math.max(htmlHeight,300)));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
           // Scale wide email layouts to the phone while retaining readable tables.
           String responsive="<style>html,body{max-width:100%!important;overflow-wrap:anywhere;word-wrap:break-word;}"+
@@ -662,6 +668,7 @@ public class MainActivity extends Activity {
     root.addView(actions,new LinearLayout.LayoutParams(-1,actionHeight));
     if(configured){
       addMessageAction(actions,"↩","Responder",()->prepareResponse(folder,uid,"reply"));
+      addMessageAction(actions,"↩↩","A todos",()->prepareResponse(folder,uid,"all"));
       addMessageAction(actions,"➜","Reenviar",()->prepareResponse(folder,uid,"forward"));
       addMessageAction(actions,"▣","Archivar",()->confirmMove(folder,uid,false));
       addMessageAction(actions,"✕","Eliminar",()->confirmMove(folder,uid,true));
@@ -669,6 +676,7 @@ public class MainActivity extends Activity {
       addMessageAction(actions,"☆","Favorito",()->toggleFavorite(folder,uid));
     }
     addMessageMenu(actions,folder,uid,cached.seen);
+    if(configured && prefs.getBoolean("default_html",false))showHtmlMessage(folder,uid);
   }
   void addMessageMenu(LinearLayout bar,String folder,long uid,boolean seen){
     addMessageAction(bar,"⋮","Más",()->{

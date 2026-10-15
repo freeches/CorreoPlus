@@ -18,3 +18,11 @@ Proyecto Android de una sola cuenta basado en V1.1 Beta.
 
 ## Instalación
 Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y descargar APK del workflow de GitHub Actions.
+
+
+## V1.1.3 — Vista HTML y respuestas
+- HTML con desplazamiento interno hasta el final, incluso en mensajes largos.
+- En Cuenta: casilla para elegir HTML por defecto o texto plano.
+- Acción «A todos» visible en la barra inferior; también disponible en Más.
+- HTML requiere conexión IMAP. Las vistas sin conexión siguen mostrando el texto en caché.
+- Conserva la barra fija, el encabezado y los adjuntos desplegables.

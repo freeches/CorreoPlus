@@ -568,18 +568,25 @@ public class MainActivity extends Activity {
           // Keep the WebView scroll independent of the outer message ScrollView.
           // The HTML has its own scrollable viewport, plus explicit navigation
           // buttons so long newsletters and quoted conversations always reach the end.
-          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.72f);
+          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.52f);
           slot.addView(view,new LinearLayout.LayoutParams(-1,Math.max(htmlHeight,300)));
           LinearLayout htmlNavigation=new LinearLayout(this);
           htmlNavigation.setOrientation(LinearLayout.HORIZONTAL);
           Button htmlTop=button("↑ Inicio HTML",()->view.post(()->view.pageUp(true)));
-          Button htmlBottom=button("↓ Final HTML",()->view.post(()->view.pageDown(true)));
+          Button htmlBottom=button("↓ Final HTML",()->view.post(()->{
+            int bottom=Math.max(0,(int)(view.getContentHeight()*view.getScale())-view.getHeight());
+            view.scrollTo(0,bottom);
+          }));
           htmlNavigation.addView(htmlTop,new LinearLayout.LayoutParams(0,-2,1));
           htmlNavigation.addView(htmlBottom,new LinearLayout.LayoutParams(0,-2,1));
           slot.addView(htmlNavigation,new LinearLayout.LayoutParams(-1,-2));
+          // Reserve a visible gap after HTML so the fixed action bar never masks its end.
+          View bottomGap=new View(this);
+          slot.addView(bottomGap,new LinearLayout.LayoutParams(-1,(int)(24*getResources().getDisplayMetrics().density)));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
           // Scale wide email layouts to the phone while retaining readable tables.
           String responsive="<style>html,body{max-width:100%!important;overflow-wrap:anywhere;word-wrap:break-word;}"+
+            "body{padding-bottom:96px!important;box-sizing:border-box!important;}"+
             "img,video,iframe{max-width:100%!important;height:auto!important;}"+
             "table{max-width:100%!important;}pre{white-space:pre-wrap;overflow-wrap:anywhere;}"+
             "</style>";

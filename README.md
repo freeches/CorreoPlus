@@ -58,3 +58,7 @@ Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y 
 - Se refuerza el control de gestos para que el ScrollView exterior no intercepte el desplazamiento del WebView.
 - Se amplía el espacio de lectura HTML al 72 % de la altura de pantalla.
 - Se mantienen las funciones de V1.1.6.
+
+
+## V1.1.8 Beta
+Corrección de lectura HTML: visor más corto para evitar recorte en el ScrollView exterior, margen final dentro del documento HTML, separación bajo el visor y botón Final HTML que salta a la posición final real. La barra de acciones continúa fija y separada del ScrollView.

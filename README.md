@@ -1,17 +1,17 @@
-# CorreoPlus V2.0 Beta — Primera entrega directa
+# CorreoPlus 2.0 — Beta ampliada
 
-Base: V1.2.2 confirmada funcional. Una sola cuenta.
+Basado en CorreoPlus V2.0 Beta. Mantiene una sola cuenta.
 
-## Implementado en esta entrega
-- Densidad de bandeja configurable: compacta, normal o cómoda.
-- Avatares locales con inicial del remitente (activables).
-- Gestos de deslizamiento configurables de forma independiente para izquierda y derecha: archivar o eliminar.
-- Preferencias persistentes sin cambiar el esquema de la caché ni las credenciales.
-- Se mantienen el lector HTML, barra inferior, respuestas, adjuntos y motor IMAP de V1.2.2.
+## Mejoras añadidas en esta entrega
+- Búsquedas guardadas por cuenta, accesibles desde la bandeja.
+- Tres firmas configurables: principal, respuestas y reenvíos.
+- Guardado automático de borradores locales al editar, recuperación al iniciar una redacción nueva y limpieza al enviar correctamente.
 
-## Pendiente de las 24 funciones aprobadas
-Esta versión es la **primera beta etiquetada V2.0**, NO implementa las 24 funciones.
-Siguen pendientes IMAP IDLE, cola offline, reconciliación remota completa, editor HTML avanzado, firmas múltiples, borradores automáticos, reenvío con todos los adjuntos, contactos, autocompletado, búsquedas guardadas, búsqueda de cuerpo completa, seguridad antiphishing, bloqueo de rastreadores avanzado, temas de color y barra personalizable, entre otras.
+## Funciones que ya existían
+Densidad de bandeja, avatares con iniciales, gestos configurables, HTML, imágenes CID, responder a todos, sincronización por bloques y diagnósticos.
 
-## Verificación
-Integridad ZIP comprobada. Compilación Android y prueba funcional pendientes en GitHub Actions.
+## Limitaciones honestas
+- Los borradores se guardan en preferencias locales y no en la carpeta IMAP Borradores; solo hay un borrador local recuperable por cuenta y no conserva adjuntos ni formato enriquecido.
+- Las firmas adicionales son texto convertido a HTML básico, no un editor completo de firmas HTML.
+- No se han implementado aún las 24 funciones aprobadas; IMAP IDLE, cola sin conexión, contactos, protección antifraude y más siguen pendientes.
+- No se ha verificado la compilación en un SDK Android. Comprobar GitHub Actions antes de instalar.

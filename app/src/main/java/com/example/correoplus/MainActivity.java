@@ -213,6 +213,10 @@ public class MainActivity extends Activity {
   inlineImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("inline_images",checked).apply());
   CheckBox remoteImages=new CheckBox(this);remoteImages.setText("Permitir imágenes externas (pueden revelar la apertura del correo)");remoteImages.setTextColor(foreground());remoteImages.setChecked(prefs.getBoolean("remote_images",false));content.addView(remoteImages);
   remoteImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("remote_images",checked).apply());
+  content.addView(text("Firmas HTML: principal, respuestas y reenvíos",16));
+  EditText replySignature=input(content,"Firma para respuestas",prefs.getString("signature_reply",""),false);
+  EditText forwardSignature=input(content,"Firma para reenvíos",prefs.getString("signature_forward",""),false);
+  content.addView(button("Guardar firmas adicionales",()->{prefs.edit().putString("signature_reply",replySignature.getText().toString()).putString("signature_forward",forwardSignature.getText().toString()).apply();error("Firmas guardadas");}));
   content.addView(text("Firma automática (se añade al enviar)",14));
   EditText signature=input(content,"Tu firma",prefs.getString("signature",""),false);
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
@@ -378,6 +382,15 @@ public class MainActivity extends Activity {
       public void onTextChanged(CharSequence s,int start,int before,int count){renderSearch(results,folder,s.toString());}
       public void afterTextChanged(android.text.Editable e){}
     });
+    content.addView(button("💾 Guardar búsqueda",()->{
+      String term=search.getText().toString().trim();if(term.isEmpty()){error("Escribe una búsqueda primero");return;}
+      String key="saved_searches_"+lastAccount;
+      LinkedHashSet<String> terms=new LinkedHashSet<>(prefs.getStringSet(key,new HashSet<String>()));terms.add(term);
+      prefs.edit().putStringSet(key,terms).apply();error("Búsqueda guardada");
+    }));
+    LinkedHashSet<String> savedTerms=new LinkedHashSet<>(prefs.getStringSet("saved_searches_"+lastAccount,new HashSet<String>()));
+    for(String savedTerm:savedTerms){content.addView(button("🔎 "+savedTerm,()->search.setText(savedTerm)));}
+    content.addView(button("🗑 Borrar búsquedas guardadas",()->{prefs.edit().remove("saved_searches_"+lastAccount).apply();renderCached(folder);}));
     renderSearch(results,folder,"");content.addView(button("🔎 Búsqueda avanzada",()->advancedSearchScreen(folder)));content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));
     content.addView(button("← 100 anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}));
     content.addView(button("100 siguientes →",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
@@ -1026,6 +1039,23 @@ public class MainActivity extends Activity {
       }
     }
     body.setText(initialHtml?richDraft:new SpannableStringBuilder(bodyValue));content.addView(body);
+    final String draftKey="draft_v20_"+lastAccount;
+    if(toValue.isEmpty()&&subjectValue.isEmpty()&&bodyValue.isEmpty()&&prefs.contains(draftKey+"_body")){
+      new AlertDialog.Builder(this).setTitle("Borrador recuperado")
+        .setMessage("Hay un mensaje sin enviar. ¿Quieres recuperarlo?")
+        .setPositiveButton("Recuperar",(d,w)->{to.setText(prefs.getString(draftKey+"_to",""));cc.setText(prefs.getString(draftKey+"_cc",""));subject.setText(prefs.getString(draftKey+"_subject",""));body.setText(prefs.getString(draftKey+"_body",""));})
+        .setNegativeButton("Descartar",(d,w)->prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply()).show();
+    }
+    final Runnable saveDraft=()->{if(!to.getText().toString().trim().isEmpty()||!subject.getText().toString().trim().isEmpty()||!body.getText().toString().trim().isEmpty()){
+      prefs.edit().putString(draftKey+"_to",to.getText().toString()).putString(draftKey+"_cc",cc.getText().toString()).putString(draftKey+"_subject",subject.getText().toString()).putString(draftKey+"_body",body.getText().toString()).apply();
+    }};
+    android.text.TextWatcher draftWatcher=new android.text.TextWatcher(){
+      public void beforeTextChanged(CharSequence x,int a,int c,int f){}
+      public void onTextChanged(CharSequence x,int a,int b,int c){ui.removeCallbacks(saveDraft);ui.postDelayed(saveDraft,650);}
+      public void afterTextChanged(android.text.Editable x){}
+    };
+    to.addTextChangedListener(draftWatcher);cc.addTextChangedListener(draftWatcher);subject.addTextChangedListener(draftWatcher);body.addTextChangedListener(draftWatcher);
+    content.addView(button("💾 Guardar borrador",()->{saveDraft.run();error("Borrador guardado");}));
     LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
     addRichFormatting(formatBar,body);content.addView(formatBar);
     TextView hint=text("Selecciona texto y pulsa B, I, U o 🔗. El correo se envía en el formato elegido.",12);content.addView(hint);
@@ -1038,6 +1068,8 @@ public class MainActivity extends Activity {
       if(enabled&&body.getText().toString().equals(bodyValue))body.setText(richTemplate);
     });
     attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
+      if(replyId!=null&&!replyId.isEmpty())signature=prefs.getString("signature_reply",signature);
+      else if(quotedHtml!=null&&!quotedHtml.isEmpty())signature=prefs.getString("signature_forward",signature);
       String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+signature);
       String formatted=android.text.Html.toHtml(body.getText(),android.text.Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL);
       // Preserve the original MIME HTML verbatim instead of round-tripping through Html.fromHtml/toHtml.
@@ -1072,6 +1104,6 @@ public class MainActivity extends Activity {
           multi.addBodyPart(attachment);
         }m.setContent(multi);
       }
-      Transport.send(m);show(()->{new AlertDialog.Builder(this).setMessage("Mensaje enviado").setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
+      Transport.send(m);prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply();show(()->{new AlertDialog.Builder(this).setMessage("Mensaje enviado").setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
   @Override public void onBackPressed(){renderCached(folderName);}
 }

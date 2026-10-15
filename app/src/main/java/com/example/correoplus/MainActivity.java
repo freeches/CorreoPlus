@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
   CheckBox remember=new CheckBox(this);remember.setText("Recordar contraseña cifrada en este dispositivo");content.addView(remember);
   content.addView(button("Borrar contraseña guardada",()->{CredentialVault.clear(this);pw=null;configured=false;error("Credenciales guardadas eliminadas");}));smtpHost=input(content,"Servidor SMTP",prefs.getString("smtp_host",""),false);smtpPort=input(content,"Puerto SMTP 465 o 587",prefs.getString("smtp_port","587"),false);content.addView(button("Conectar y abrir bandeja",()->{try{h=host.getText().toString().trim();u=user.getText().toString().trim();pw=pass.getText().toString();sh=smtpHost.getText().toString().trim();imapPort=Integer.parseInt(port.getText().toString().trim());sPort=Integer.parseInt(smtpPort.getText().toString().trim());if(h.isEmpty()||u.isEmpty()||pw.isEmpty()||!(imapPort==993||imapPort==143)||!(sPort==465||sPort==587))throw new Exception("Revisa servidor, usuario, contraseña y puertos admitidos");rememberPassword=remember.isChecked();configured=true;lastAccount=u.toLowerCase(Locale.ROOT)+"@"+h.toLowerCase(Locale.ROOT);if(rememberPassword){CredentialVault.save(this,lastAccount,pw);}else{CredentialVault.clear(this);}prefs.edit().putString("account",lastAccount).putString("imap_host",h).putString("imap_port",String.valueOf(imapPort)).putString("username",u).putString("smtp_host",sh).putString("smtp_port",String.valueOf(sPort)).apply();openFolder("INBOX");}catch(Exception e){error(e.getMessage());}}));}
-  Properties imapProperties(){Properties props=new Properties();props.put("mail.store.protocol",imapPort==993?"imaps":"imap");String prefix=imapPort==993?"mail.imaps":"mail.imap";props.put(prefix+".connectiontimeout","15000");props.put(prefix+".timeout","15000");if(imapPort==993)props.put("mail.imaps.ssl.enable","true");else{props.put("mail.imap.starttls.enable","true");props.put("mail.imap.starttls.required","true");}return props;}
+  Properties imapProperties(){Properties props=new Properties();props.put("mail.store.protocol",imapPort==993?"imaps":"imap");String prefix=imapPort==993?"mail.imaps":"mail.imap";props.put(prefix+".connectiontimeout","15000");props.put(prefix+".timeout","45000");if(imapPort==993)props.put("mail.imaps.ssl.enable","true");else{props.put("mail.imap.starttls.enable","true");props.put("mail.imap.starttls.required","true");}return props;}
   Store connect()throws Exception{Session s=Session.getInstance(imapProperties());Store st=s.getStore(imapPort==993?"imaps":"imap");st.connect(h,imapPort,u,pw);return st;}
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
@@ -219,28 +219,31 @@ public class MainActivity extends Activity {
         int n=f.getMessageCount();
         long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
         long lastUid=cache.maxUid(lastAccount,folder,validity);
+        // Initial synchronization fetches just the newest 50 headers. Later syncs
+        // extend the cached window by 50, without downloading MIME attachments.
+        int cachedCount=cache.count(lastAccount,folder);
+        int window=Math.min(n,Math.max(50,cachedCount+50));
+        int lower=Math.max(0,n-window);
         ArrayList<MailCache.Item> batch=new ArrayList<>();
-        for(int i=n;i>Math.max(0,n-500);i--){
+        for(int i=n;i>lower;i--){
           Message m=f.getMessage(i);
           long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
-          MailCache.Item existing=uid<=lastUid?cache.get(lastAccount,folder,uid):null;
+          MailCache.Item existing=cache.get(lastAccount,folder,uid);
+          if(existing!=null){
+            // Do not request flags/content for already cached messages during bulk sync.
+            continue;
+          }
           boolean seen=m.isSet(Flags.Flag.SEEN);
-          if(existing!=null){if(existing.seen!=seen)cache.updateSeen(lastAccount,folder,validity,uid,seen);}
-          else{Date d=m.getSentDate();int attachmentState=-1;
-            try{ArrayList<AttachmentInfo> found=new ArrayList<>();collectAttachments(m,found,0);attachmentState=found.isEmpty()?0:1;}
-            catch(Exception inspectionError){if(temporaryImapFailure(inspectionError))throw inspectionError;}
-            batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),seen,null,attachmentState));}
-        }
-        cache.saveHeaders(lastAccount,folder,validity,batch);
-        ArrayList<MailCache.Item> recent=cache.list(lastAccount,folder);
-        for(int j=0;j<Math.min(20,recent.size());j++){
-          MailCache.Item item=recent.get(j);
-          if(item.body==null){
-            try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(item.uid):null;
-              if(m!=null)cache.saveBody(lastAccount,folder,item.uid,body(m,0));
-            }catch(Exception ex){if(temporaryImapFailure(ex))throw ex;}
+          Date d=m.getSentDate();
+          // Attachment detection requires MIME body fetch and is deferred until open.
+          batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),
+              d==null?"":d.toString(),seen,null,-1));
+          if(batch.size()>=25){
+            cache.saveHeaders(lastAccount,folder,validity,batch);
+            batch.clear();
           }
         }
+        if(!batch.isEmpty())cache.saveHeaders(lastAccount,folder,validity,batch);
         prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
       }finally{try{if(f.isOpen())f.close(false);}catch(Exception ignored){}}
     }finally{try{if(st.isConnected())st.close();}catch(Exception ignored){}}
@@ -252,14 +255,14 @@ public class MainActivity extends Activity {
     if(!syncing.compareAndSet(false,true)){
       content.addView(text("Ya hay una sincronización en curso…",14));return;
     }
-    content.addView(text("Sincronizando…",14));
+    content.addView(text("Sincronizando cabeceras en bloques de 25 (hasta 50 correos nuevos por vez)…",14));
     work(()->{
       try{
         for(int attempt=0;attempt<3;attempt++){
           try{
             // syncOnce always creates and closes its own Store and Folder.
             syncOnce(folder);
-            show(()->{if(folder.equals(folderName))renderCached(folder);});
+            show(()->{if(folder.equals(folderName)){renderCached(folder);content.addView(text("Sincronización por bloques completada. Pulsa Sincronizar otra vez para descargar correos más antiguos.",13));}});
             return;
           }catch(Exception ex){
             if(!temporaryImapFailure(ex))throw ex;
@@ -271,7 +274,7 @@ public class MainActivity extends Activity {
         }
         show(()->{if(folder.equals(folderName)){
           renderCached(folder);
-          content.addView(text("No se pudo conectar tras 3 intentos. Los correos guardados siguen disponibles. Puedes sincronizar de nuevo más tarde.",14));
+          content.addView(text("La conexión IMAP se interrumpió tras 3 intentos. Los bloques descargados siguen guardados. Pulsa Sincronizar para continuar.",14));
         }});
       }finally{syncing.set(false);}
     });

@@ -34,3 +34,12 @@ Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y 
 - Editor enriquecido Android con negrita, cursiva, subrayado y enlaces; conserva los estilos compatibles del HTML original en respuestas.
 - En HTML se envía MIME multipart/alternative; en plano solo text/plain.
 - Limitación: Android Html.fromHtml no conserva todo el CSS, tablas ni imágenes remotas de los correos originales.
+
+
+## V1.1.5 Beta: sincronización inicial gradual
+- IMAP sincroniza primero 50 cabeceras, y amplía la ventana en 50 al sincronizar de nuevo.
+- Guarda cabeceras en transacciones de 25, para conservar progreso ante desconexiones.
+- Evita descargar el MIME de adjuntos y los cuerpos de 20 mensajes durante la sincronización inicial; se obtienen al abrir un mensaje.
+- Timeout de lectura IMAP aumentado a 45 segundos.
+- No cambia la configuración de la cuenta ni el editor HTML.
+- Limitación: el icono de adjuntos puede aparecer tras abrir el mensaje, y el contador refleja los mensajes guardados, no el total del servidor.

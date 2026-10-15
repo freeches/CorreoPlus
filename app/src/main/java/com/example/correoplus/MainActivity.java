@@ -172,6 +172,7 @@ public class MainActivity extends Activity {
   }}
   void settings(){layout("Cuentas");
   CheckBox notices=new CheckBox(this);notices.setText("Notificaciones y sincronización periódica (mínimo 15 minutos)");notices.setTextColor(foreground());notices.setChecked(prefs.getBoolean("background_sync",false));content.addView(notices);notices.setOnCheckedChangeListener((v,enabled)->{prefs.edit().putBoolean("background_sync",enabled).apply();MailBackground.schedule(this);});
+  content.addView(button("📊 Estado y diagnóstico IMAP",()->syncDiagnostics()));
   content.addView(text("Preferencias",19));
   CheckBox dark=new CheckBox(this);dark.setText("Modo oscuro");dark.setTextColor(foreground());dark.setChecked(darkMode);
   content.addView(dark);dark.setOnCheckedChangeListener((v,checked)->{prefs.edit().putBoolean("dark_mode",checked).apply();darkMode=checked;settings();});
@@ -214,6 +215,16 @@ public class MainActivity extends Activity {
   void waitBeforeRetry(int attempt)throws InterruptedException{
     Thread.sleep(attempt==0?1500L:3000L);
   }
+  // V1.2: persistent per-folder progress, bounded batches and diagnostic messages.
+  String syncKey(String folder){return "sync120_"+lastAccount+"_"+folder;}
+  void syncStatus(String folder,String status){prefs.edit().putString(syncKey(folder)+"_status",status).apply();}
+  String syncFailure(Exception ex){
+    String kind=ex instanceof javax.mail.AuthenticationFailedException?"Autenticación":
+      temporaryImapFailure(ex)?"Conexión interrumpida":"Error IMAP";
+    String detail=ex.getClass().getSimpleName();
+    // Never include raw exception messages: some servers echo credentials or URLs.
+    return kind+" ("+detail+")";
+  }
   void syncOnce(String folder)throws Exception{
     Store st=connect();
     try{
@@ -222,69 +233,108 @@ public class MainActivity extends Activity {
         f.open(Folder.READ_ONLY);
         int n=f.getMessageCount();
         long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
-        long lastUid=cache.maxUid(lastAccount,folder,validity);
-        // Initial synchronization fetches just the newest 50 headers. Later syncs
-        // extend the cached window by 50, without downloading MIME attachments.
         int cachedCount=cache.count(lastAccount,folder);
         int window=Math.min(n,Math.max(50,cachedCount+50));
         int lower=Math.max(0,n-window);
         ArrayList<MailCache.Item> batch=new ArrayList<>();
+        int processed=0, added=0, updated=0;
+        syncStatus(folder,"Conectado · "+n+" mensajes en servidor");
         for(int i=n;i>lower;i--){
           Message m=f.getMessage(i);
           long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
+          if(uid<=0)continue;
           MailCache.Item existing=cache.get(lastAccount,folder,uid);
           if(existing!=null){
-            // Do not request flags/content for already cached messages during bulk sync.
-            continue;
+            // Refresh remote read/unread state for the visible window.
+            cache.updateSeen(lastAccount,folder,validity,uid,m.isSet(Flags.Flag.SEEN));
+            updated++;
+          }else{
+            boolean seen=m.isSet(Flags.Flag.SEEN);
+            Date d=m.getSentDate();
+            batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),
+                d==null?"":d.toString(),seen,null,-1));
+            added++;
           }
-          boolean seen=m.isSet(Flags.Flag.SEEN);
-          Date d=m.getSentDate();
-          // Attachment detection requires MIME body fetch and is deferred until open.
-          batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),
-              d==null?"":d.toString(),seen,null,-1));
-          if(batch.size()>=25){
-            cache.saveHeaders(lastAccount,folder,validity,batch);
-            batch.clear();
+          processed++;
+          if(batch.size()>=10){cache.saveHeaders(lastAccount,folder,validity,batch);batch.clear();}
+          if(processed%10==0){
+            String progress="Procesados "+processed+"/"+(n-lower)+" · nuevos "+added+" · estados "+updated;
+            syncStatus(folder,progress);
+            final String display=progress;
+            show(()->{if(folder.equals(folderName)){
+              // Do not rebuild the whole list on each message.
+              if(syncProgressLabel!=null)syncProgressLabel.setText(display);
+            }});
           }
         }
         if(!batch.isEmpty())cache.saveHeaders(lastAccount,folder,validity,batch);
         prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
+        syncStatus(folder,"Completado · "+added+" nuevos, "+updated+" actualizados");
       }finally{try{if(f.isOpen())f.close(false);}catch(Exception ignored){}}
     }finally{try{if(st.isConnected())st.close();}catch(Exception ignored){}}
   }
+  TextView syncProgressLabel;
   void openFolder(String folder){
     if(!folder.equals(folderName))pageOffset=0;
     folderName=folder;renderCached(folder);
-    if(!configured){content.addView(text("Sin sesión activa · Abre Cuenta para conectar; la caché sigue disponible",14));return;}
+    if(!configured){content.addView(text("Sin sesión activa · La caché sigue disponible",14));return;}
     if(!syncing.compareAndSet(false,true)){
       content.addView(text("Ya hay una sincronización en curso…",14));return;
     }
-    content.addView(text("Sincronizando cabeceras en bloques de 25 (hasta 50 correos nuevos por vez)…",14));
+    syncProgressLabel=text("Conectando al servidor IMAP…",14);
+    content.addView(syncProgressLabel);
     work(()->{
       try{
         for(int attempt=0;attempt<3;attempt++){
           try{
-            // syncOnce always creates and closes its own Store and Folder.
             syncOnce(folder);
-            show(()->{if(folder.equals(folderName)){renderCached(folder);content.addView(text("Sincronización por bloques completada. Pulsa Sincronizar otra vez para descargar correos más antiguos.",13));}});
+            show(()->{if(folder.equals(folderName)){
+              renderCached(folder);
+              content.addView(text(prefs.getString(syncKey(folder)+"_status","Sincronización terminada"),13));
+            }});
             return;
           }catch(Exception ex){
-            if(!temporaryImapFailure(ex))throw ex;
-            if(attempt<2){
-              try{waitBeforeRetry(attempt);}
-              catch(InterruptedException ie){Thread.currentThread().interrupt();return;}
+            String failure=syncFailure(ex);
+            syncStatus(folder,failure+" · intento "+(attempt+1)+"/3");
+            show(()->{if(folder.equals(folderName)&&syncProgressLabel!=null)
+              syncProgressLabel.setText(prefs.getString(syncKey(folder)+"_status",failure));});
+            if(!temporaryImapFailure(ex)||attempt==2){
+              show(()->{if(folder.equals(folderName)){
+                renderCached(folder);
+                content.addView(text("Sincronización detenida: "+failure+". Lo descargado permanece guardado.",14));
+              }});
+              return;
             }
+            try{waitBeforeRetry(attempt);}
+            catch(InterruptedException ie){Thread.currentThread().interrupt();return;}
           }
         }
-        show(()->{if(folder.equals(folderName)){
-          renderCached(folder);
-          content.addView(text("La conexión IMAP se interrumpió tras 3 intentos. Los bloques descargados siguen guardados. Pulsa Sincronizar para continuar.",14));
-        }});
       }finally{syncing.set(false);}
     });
   }
 
+  void syncDiagnostics(){
+    layout("Diagnóstico de sincronización");
+    content.addView(button("← Volver",()->settings()));
+    content.addView(text("Los diagnósticos no incluyen contraseñas ni contenido de mensajes.",14));
+    content.addView(text("Cuenta: "+(configured?"configurada":"sin sesión activa"),15));
+    for(String name:new String[]{"INBOX",folderName}){
+      if(name.equals("INBOX")&&!name.equals(folderName)){
+        content.addView(text(name+": "+prefs.getString(syncKey(name)+"_status","Sin datos"),14));
+      }else if(name.equals(folderName)){
+        content.addView(text(name+": "+prefs.getString(syncKey(name)+"_status","Sin datos"),14));
+      }
+    }
+    content.addView(text("Mensajes guardados en "+folderName+": "+cache.count(lastAccount,folderName),14));
+    content.addView(button("Copiar diagnóstico",()->{
+      String report="CorreoPlus V1.2\nCarpeta: "+folderName+"\nEstado: "+prefs.getString(syncKey(folderName)+"_status","Sin datos")+"\nEn caché: "+cache.count(lastAccount,folderName);
+      android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+      clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Diagnóstico CorreoPlus",report));
+      error("Diagnóstico copiado");
+    }));
+  }
   void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,100);content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+    content.addView(button("📊 Estado IMAP",()->syncDiagnostics()));
     long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
     content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));
     LinearLayout filters=new LinearLayout(this);filters.setOrientation(LinearLayout.HORIZONTAL);

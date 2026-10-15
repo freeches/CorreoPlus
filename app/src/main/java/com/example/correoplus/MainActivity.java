@@ -416,40 +416,76 @@ public class MainActivity extends Activity {
     }
     return "";
   }
+  // Keep the message header, expandable recipients/attachments and fixed action bar.
+  // Only the body region is replaced when switching between plain text and HTML.
+  LinearLayout messageBodySlot;
+  String displayedFolder=""; long displayedUid=-1;
+  boolean htmlVisible=false;
   void showHtmlMessage(String folder,long uid){
-    if(!configured){error("Conéctate para descargar el HTML original.");return;}
+    if(!configured){Toast.makeText(this,"Conéctate para ver el HTML",Toast.LENGTH_SHORT).show();return;}
+    if(messageBodySlot==null||!folder.equals(displayedFolder)||uid!=displayedUid){openCachedMessage(folder,uid);}
+    final LinearLayout slot=messageBodySlot;
+    if(slot==null)return;
+    Toast.makeText(this,"Cargando HTML…",Toast.LENGTH_SHORT).show();
     work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);
       try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
-        if(m==null)throw new Exception("Mensaje no disponible");String html=htmlBody(m,0);
-        show(()->{if(html.isEmpty()){error("Este mensaje no tiene versión HTML.");return;}
-          // A WebView must own the remaining screen height: nesting it in the
-          // message ScrollView with a fixed height cuts off long HTML messages.
-          root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
-          root.setBackgroundColor(background());setContentView(root);
-          root.addView(button("← Volver al mensaje",()->openCachedMessage(folder,uid)));
-          root.addView(text("HTML · Imágenes externas y JavaScript bloqueados",13));
-          WebView view=new WebView(this);view.getSettings().setJavaScriptEnabled(false);
-          view.getSettings().setBlockNetworkLoads(true);view.getSettings().setAllowFileAccess(false);
+        if(m==null)throw new Exception("Mensaje no disponible");
+        String html=htmlBody(m,0);
+        show(()->{
+          if(slot!=messageBodySlot||!folder.equals(displayedFolder)||uid!=displayedUid)return;
+          if(html.isEmpty()){Toast.makeText(this,"Este correo no tiene versión HTML",Toast.LENGTH_LONG).show();return;}
+          slot.removeAllViews();
+          WebView view=new WebView(this);
+          view.getSettings().setJavaScriptEnabled(false);
+          view.getSettings().setBlockNetworkLoads(true);
+          view.getSettings().setAllowFileAccess(false);
           view.getSettings().setAllowContentAccess(false);
+          view.getSettings().setUseWideViewPort(true);
+          view.getSettings().setLoadWithOverviewMode(true);
+          view.getSettings().setBuiltInZoomControls(true);
+          view.getSettings().setDisplayZoomControls(false);
           view.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest req){
-              Intent intent=new Intent(Intent.ACTION_VIEW,req.getUrl());try{startActivity(intent);}catch(Exception ignored){}return true;
+              if(!req.isForMainFrame()||!req.hasGesture())return true;
+              String scheme=req.getUrl().getScheme();
+              if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme)&&!"mailto".equalsIgnoreCase(scheme))return true;
+              try{startActivity(new Intent(Intent.ACTION_VIEW,req.getUrl()));}catch(Exception ignored){}return true;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
               return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
             }
           });
-          view.getSettings().setUseWideViewPort(true);
-          view.getSettings().setLoadWithOverviewMode(true);
-          view.getSettings().setBuiltInZoomControls(true);
-          view.getSettings().setDisplayZoomControls(false);
-          root.addView(view,new LinearLayout.LayoutParams(-1,0,1f));
+          // The HTML WebView is inside the message's scrolling content. Measure its
+          // document height to allow the outer ScrollView to reach the full message.
+          view.getSettings().setDefaultTextEncodingName("UTF-8");
+          view.setWebChromeClient(new android.webkit.WebChromeClient(){
+            @Override public void onProgressChanged(WebView v,int progress){
+              if(progress==100){
+                v.evaluateJavascript("Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)",height->{
+                  if(slot!=messageBodySlot||v.getParent()!=slot)return;
+                  try{double cssHeight=Double.parseDouble(height.replace("\"",""));
+                    int px=(int)Math.min(200000,Math.max(240,cssHeight*getResources().getDisplayMetrics().density));
+                    v.setLayoutParams(new LinearLayout.LayoutParams(-1,px));
+                  }catch(Exception ignored){}
+                });
+              }
+            }
+          });
+          slot.addView(view,new LinearLayout.LayoutParams(-1,(int)(400*getResources().getDisplayMetrics().density)));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
           String safeHtml=html.replaceFirst("(?i)<head[^>]*>","$0"+viewport);
           if(safeHtml.equals(html))safeHtml=viewport+html;
           view.loadDataWithBaseURL(null,safeHtml,"text/html","UTF-8",null);
+          htmlVisible=true;
         });
       }finally{f.close(false);}}finally{st.close();}});
+  }
+  void showPlainMessage(String folder,long uid){
+    MailCache.Item cached=cache.get(lastAccount,folder,uid);
+    if(cached==null||messageBodySlot==null)return;
+    messageBodySlot.removeAllViews();
+    messageBodySlot.addView(text(cached.body==null?"Contenido todavía no descargado.":cached.body,16));
+    htmlVisible=false;
   }
   void styleSelection(EditText editor,int style){int a=editor.getSelectionStart(),b=editor.getSelectionEnd();
     if(a<0||b<=a){Toast.makeText(this,"Selecciona texto primero",Toast.LENGTH_SHORT).show();return;}
@@ -519,6 +555,7 @@ public class MainActivity extends Activity {
   void openCachedMessage(String folder,long uid){
     MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;
     layout("Mensaje");
+    displayedFolder=folder; displayedUid=uid; htmlVisible=false;
     // A true vertical layout: scroll uses remaining space; actions are a fixed sibling.
     // No overlay and no pixel-sized controls (which were clipped on high-density screens).
     ScrollView messageScroll=(ScrollView)root.getChildAt(1);
@@ -552,7 +589,9 @@ public class MainActivity extends Activity {
       receivedAttachments.setVisibility(expand?View.VISIBLE:View.GONE);
       attachmentToggle.setText(expand?"📎 Adjuntos  ⌃":"📎 Adjuntos  ⌄");});
     if(configured)loadAttachments(folder,uid);
-    content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
+    messageBodySlot=new LinearLayout(this);messageBodySlot.setOrientation(LinearLayout.VERTICAL);
+    content.addView(messageBodySlot);
+    showPlainMessage(folder,uid);
     LinearLayout actions=new LinearLayout(this);
     actions.setOrientation(LinearLayout.HORIZONTAL);
     actions.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -582,13 +621,14 @@ public class MainActivity extends Activity {
     PopupMenu popup=new PopupMenu(this,anchor);
     popup.getMenu().add(seen?"Marcar como no leído":"Marcar como leído");
     popup.getMenu().add("Descargar contenido");
-    popup.getMenu().add("Ver HTML original");
+    popup.getMenu().add(htmlVisible?"Ver texto plano":"Ver HTML original");
     popup.getMenu().add("Mover a carpeta (archivar)");
     popup.setOnMenuItemClickListener(item->{
       String choice=item.getTitle().toString();
       if(choice.startsWith("Marcar como"))setSeenBatch(folder,!seen,new ArrayList<>(java.util.Collections.singletonList(uid)));
       else if(choice.equals("Descargar contenido"))fetchBody(folder,uid);
       else if(choice.equals("Ver HTML original"))showHtmlMessage(folder,uid);
+      else if(choice.equals("Ver texto plano"))showPlainMessage(folder,uid);
       else if(choice.startsWith("Mover a carpeta"))confirmMove(folder,uid,false);
       return true;
     });

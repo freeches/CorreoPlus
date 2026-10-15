@@ -519,15 +519,10 @@ public class MainActivity extends Activity {
   void openCachedMessage(String folder,long uid){
     MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;
     layout("Mensaje");
-    // Keep actions outside the scrolling message, in a bottom-anchored overlay.
-    // This avoids losing them beneath long messages or nested content.
+    // A true vertical layout: scroll uses remaining space; actions are a fixed sibling.
+    // No overlay and no pixel-sized controls (which were clipped on high-density screens).
     ScrollView messageScroll=(ScrollView)root.getChildAt(1);
-    root.removeView(messageScroll);
-    FrameLayout messageFrame=new FrameLayout(this);
-    root.addView(messageFrame,new LinearLayout.LayoutParams(-1,0,1));
-    messageFrame.addView(messageScroll,new FrameLayout.LayoutParams(-1,-1));
-    int actionHeight=(int)(60*getResources().getDisplayMetrics().density);
-    content.setPadding(14,12,14,12+actionHeight);
+    int actionHeight=(int)(76*getResources().getDisplayMetrics().density+0.5f);
     content.addView(button("← Volver",()->renderCached(folder)));
     TextView subject=text(cached.subject,23);subject.setTypeface(null,Typeface.BOLD);content.addView(subject);
     LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -558,27 +553,31 @@ public class MainActivity extends Activity {
       attachmentToggle.setText(expand?"📎 Adjuntos  ⌃":"📎 Adjuntos  ⌄");});
     if(configured)loadAttachments(folder,uid);
     content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
-    LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);
+    LinearLayout actions=new LinearLayout(this);
+    actions.setOrientation(LinearLayout.HORIZONTAL);
     actions.setGravity(android.view.Gravity.CENTER_VERTICAL);
     actions.setBackgroundColor(darkMode?Color.rgb(30,39,51):Color.WHITE);
-    actions.setElevation(8*getResources().getDisplayMetrics().density);
-    FrameLayout.LayoutParams barParams=new FrameLayout.LayoutParams(-1,actionHeight,android.view.Gravity.BOTTOM);
-    messageFrame.addView(actions,barParams);
-    addMessageAction(actions,"☆",()->toggleFavorite(folder,uid));
+    actions.setElevation(6*getResources().getDisplayMetrics().density);
+    // Root is VERTICAL: the weighted ScrollView ends above this always-visible bar.
+    root.addView(actions,new LinearLayout.LayoutParams(-1,actionHeight));
     if(configured){
-      addMessageAction(actions,"▣",()->confirmMove(folder,uid,false));
-      addMessageAction(actions,"🗑",()->confirmMove(folder,uid,true));
-      addMessageAction(actions,"↩",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,""));
-      addMessageAction(actions,"↪",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body));
-      addMessageMenu(actions,folder,uid,cached.seen);
+      addMessageAction(actions,"↩","Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,""));
+      addMessageAction(actions,"➜","Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body));
+      addMessageAction(actions,"▣","Archivar",()->confirmMove(folder,uid,false));
+      addMessageAction(actions,"✕","Eliminar",()->confirmMove(folder,uid,true));
+    }else{
+      addMessageAction(actions,"☆","Favorito",()->toggleFavorite(folder,uid));
     }
+    addMessageMenu(actions,folder,uid,cached.seen);
   }
   void addMessageMenu(LinearLayout bar,String folder,long uid,boolean seen){
-    TextView more=text("⋮",26);more.setGravity(android.view.Gravity.CENTER);
-    more.setContentDescription("Más acciones");
-    bar.addView(more,new LinearLayout.LayoutParams(0,56,1));
-    more.setOnClickListener(v->{MailCache.Item current=cache.get(lastAccount,folder,uid);showMessageOptions(more,folder,uid,current==null?seen:current.seen);});
+    addMessageAction(bar,"⋮","Más",()->{
+      View anchor=bar.getChildAt(bar.getChildCount()-1);
+      MailCache.Item current=cache.get(lastAccount,folder,uid);
+      showMessageOptions(anchor,folder,uid,current==null?seen:current.seen);
+    });
   }
+
   void showMessageOptions(View anchor,String folder,long uid,boolean seen){
     PopupMenu popup=new PopupMenu(this,anchor);
     popup.getMenu().add(seen?"Marcar como no leído":"Marcar como leído");
@@ -595,9 +594,23 @@ public class MainActivity extends Activity {
     });
     popup.show();
   }
-  void addMessageAction(LinearLayout bar,String label,Runnable action){
-    TextView item=text(label,22);item.setGravity(android.view.Gravity.CENTER);
-    item.setOnClickListener(v->action.run());bar.addView(item,new LinearLayout.LayoutParams(0,56,1));
+  void addMessageAction(LinearLayout bar,String symbol,String label,Runnable action){
+    LinearLayout cell=new LinearLayout(this);
+    cell.setOrientation(LinearLayout.VERTICAL);
+    cell.setGravity(android.view.Gravity.CENTER);
+    cell.setMinimumHeight((int)(64*getResources().getDisplayMetrics().density+0.5f));
+    TextView glyph=text(symbol,25);
+    glyph.setGravity(android.view.Gravity.CENTER);
+    glyph.setIncludeFontPadding(false);
+    TextView caption=text(label,11);
+    caption.setGravity(android.view.Gravity.CENTER);
+    caption.setSingleLine(true);
+    caption.setIncludeFontPadding(false);
+    cell.addView(glyph,new LinearLayout.LayoutParams(-1,-2));
+    cell.addView(caption,new LinearLayout.LayoutParams(-1,-2));
+    cell.setContentDescription(label);
+    cell.setOnClickListener(v->action.run());
+    bar.addView(cell,new LinearLayout.LayoutParams(0,-1,1));
   }
   void confirmMove(String folder,long uid,boolean delete){
     new AlertDialog.Builder(this).setTitle(delete?"Mover a Papelera":"Archivar mensaje")

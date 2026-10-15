@@ -26,3 +26,11 @@ Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y 
 - Acción «A todos» visible en la barra inferior; también disponible en Más.
 - HTML requiere conexión IMAP. Las vistas sin conexión siguen mostrando el texto en caché.
 - Conserva la barra fija, el encabezado y los adjuntos desplegables.
+
+
+## V1.1.4 Beta — redacción HTML
+- La preferencia `default_html` controla el formato inicial del editor en Redactar, Responder, Responder a todos y Reenviar.
+- Casilla por mensaje para cambiar entre HTML y texto plano.
+- Editor enriquecido Android con negrita, cursiva, subrayado y enlaces; conserva los estilos compatibles del HTML original en respuestas.
+- En HTML se envía MIME multipart/alternative; en plano solo text/plain.
+- Limitación: Android Html.fromHtml no conserva todo el CSS, tablas ni imágenes remotas de los correos originales.

@@ -6,6 +6,8 @@ import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.text.Spannable;
+import android.text.SpannableStringBuilder;
+import android.text.Html;
 import android.text.style.StyleSpan;
 import android.text.style.UnderlineSpan;
 import android.graphics.Typeface;
@@ -764,6 +766,7 @@ public class MainActivity extends Activity {
           if(original==null)throw new Exception("No se encuentra el mensaje original");
           String subject=decode(original.getSubject());
           String quoted=body(original,0);
+          String quotedHtml=htmlPart(original,0);
           String from=recipientList(original.getFrom());
           String to=recipientList(original.getRecipients(Message.RecipientType.TO));
           String cc=recipientList(original.getRecipients(Message.RecipientType.CC));
@@ -796,9 +799,10 @@ public class MainActivity extends Activity {
           String prefix="forward".equals(mode)?"Fwd: ":"Re: ";
           String cleanSubject=subject.replaceFirst("(?i)^(re|fwd|fw):\\s*","");
           final String finalTo=toValue,finalCc=ccValue,finalDraft=draft,finalSubject=prefix+cleanSubject;
+          final String finalQuoteHtml=quotedHtml,finalQuoteHeader=quoteHeader;
           final String finalId=messageId,finalRefs=references;
           show(()->composeAdvanced(finalTo,finalCc,finalSubject,finalDraft,
-              "forward".equals(mode)?null:finalId,"forward".equals(mode)?null:finalRefs));
+              "forward".equals(mode)?null:finalId,"forward".equals(mode)?null:finalRefs,finalQuoteHtml,finalQuoteHeader));
         }finally{f.close(false);}
       }finally{store.close();}
     });
@@ -816,12 +820,70 @@ public class MainActivity extends Activity {
       if(result.length()>0)result.append(", ");result.append(ia.toUnicodeString());
     }return result.toString();
   }
-  void compose(String toValue,String subjectValue,String bodyValue){
-    composeAdvanced(toValue,"",subjectValue,bodyValue,null,null);
+  // Locate the original HTML part, preferring it over the plain-text alternative.
+  String htmlPart(Part part,int depth)throws Exception{
+    if(depth>10)return null;
+    if(part.isMimeType("text/html")){Object value=part.getContent();return value==null?null:value.toString();}
+    Object value=part.getContent();
+    if(value instanceof Multipart){Multipart mp=(Multipart)value;
+      for(int i=0;i<mp.getCount();i++){
+        Part child=mp.getBodyPart(i);
+        if(Part.ATTACHMENT.equalsIgnoreCase(child.getDisposition()))continue;
+        String result=htmlPart(child,depth+1);if(result!=null)return result;
+      }
+    }return null;
   }
-  void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references){outgoingAttachments.clear();layout("Redactar");EditText to=input(content,"Para",toValue,false),cc=input(content,"CC (copia)",ccValue,false),subject=input(content,"Asunto",subjectValue,false);EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setText(bodyValue);body.setMinLines(8);content.addView(body);LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
-    for(String label:new String[]{"B","I","U"}){Button fmt=new Button(this);fmt.setText(label);formatBar.addView(fmt,new LinearLayout.LayoutParams(0,-2,1));fmt.setOnClickListener(v->styleSelection(body,label.equals("B")?1:label.equals("I")?2:3));}
-    content.addView(formatBar);content.addView(text("Selecciona texto y pulsa B, I o U para darle formato.",12));attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
+  void addRichFormatting(LinearLayout formatBar,EditText editor){
+    for(String label:new String[]{"B","I","U"}){
+      Button fmt=new Button(this);fmt.setText(label);
+      formatBar.addView(fmt,new LinearLayout.LayoutParams(0,-2,1));
+      fmt.setOnClickListener(v->styleSelection(editor,label.equals("B")?1:label.equals("I")?2:3));
+    }
+    Button link=new Button(this);link.setText("🔗");
+    formatBar.addView(link,new LinearLayout.LayoutParams(0,-2,1));
+    link.setOnClickListener(v->{int start=editor.getSelectionStart(),end=editor.getSelectionEnd();
+      if(start<0||end<=start){error("Selecciona el texto del enlace");return;}
+      EditText url=new EditText(this);url.setHint("https://...");url.setSingleLine(true);
+      new AlertDialog.Builder(this).setTitle("Insertar enlace").setView(url)
+        .setPositiveButton("Aplicar",(d,w)->{String address=url.getText().toString().trim();
+          if(address.startsWith("https://")||address.startsWith("http://"))
+            editor.getText().setSpan(new android.text.style.URLSpan(address),start,end,Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+          else error("Utiliza un enlace https:// o http://");})
+        .setNegativeButton("Cancelar",null).show();
+    });
+  }
+  void compose(String toValue,String subjectValue,String bodyValue){
+    composeAdvanced(toValue,"",subjectValue,bodyValue,null,null,null,null);
+  }
+  void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references,String quotedHtml,String quoteHeader){
+    outgoingAttachments.clear();layout("Redactar");
+    EditText to=input(content,"Para",toValue,false),cc=input(content,"CC (copia)",ccValue,false),subject=input(content,"Asunto",subjectValue,false);
+    boolean initialHtml=prefs.getBoolean("default_html",false);
+    CheckBox htmlMode=new CheckBox(this);htmlMode.setText("Redactar en HTML (editor con formato)");htmlMode.setChecked(initialHtml);content.addView(htmlMode);
+    EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setMinLines(8);
+    SpannableStringBuilder richDraft=new SpannableStringBuilder(bodyValue);
+    if(quotedHtml!=null&&!quotedHtml.isEmpty()&&quoteHeader!=null){
+      String richHeader="\n\n"+quoteHeader;
+      int quotedStart=bodyValue.indexOf(quoteHeader);
+      if(quotedStart>=0){
+        richDraft=new SpannableStringBuilder(bodyValue.substring(0,quotedStart));
+        richDraft.append(richHeader);
+        richDraft.append(Html.fromHtml(quotedHtml,Html.FROM_HTML_MODE_LEGACY));
+      }
+    }
+    body.setText(initialHtml?richDraft:new SpannableStringBuilder(bodyValue));content.addView(body);
+    LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
+    addRichFormatting(formatBar,body);content.addView(formatBar);
+    TextView hint=text("Selecciona texto y pulsa B, I, U o 🔗. El correo se envía en el formato elegido.",12);content.addView(hint);
+    formatBar.setVisibility(initialHtml?View.VISIBLE:View.GONE);hint.setVisibility(initialHtml?View.VISIBLE:View.GONE);
+    final SpannableStringBuilder richTemplate=richDraft;
+    htmlMode.setOnCheckedChangeListener((button,enabled)->{
+      formatBar.setVisibility(enabled?View.VISIBLE:View.GONE);hint.setVisibility(enabled?View.VISIBLE:View.GONE);
+      // Keep the current text on format changes; when switching from plain to HTML,
+      // restore the formatted original quote if the draft is still untouched.
+      if(enabled&&body.getText().toString().equals(bodyValue))body.setText(richTemplate);
+    });
+    attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
       String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+signature);
       String formatted=android.text.Html.toHtml(body.getText(),android.text.Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL);
       String finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"</body></html>";
@@ -829,8 +891,8 @@ public class MainActivity extends Activity {
       MimeMultipart alternative=new MimeMultipart("alternative");
       MimeBodyPart plain=new MimeBodyPart();plain.setText(finalBody,"UTF-8");alternative.addBodyPart(plain);
       MimeBodyPart rich=new MimeBodyPart();rich.setContent(finalHtml,"text/html; charset=UTF-8");alternative.addBodyPart(rich);
-      if(files.isEmpty())m.setContent(alternative);
-      else{MimeMultipart multi=new MimeMultipart("mixed");MimeBodyPart messagePart=new MimeBodyPart();messagePart.setContent(alternative);multi.addBodyPart(messagePart);
+      if(files.isEmpty()){if(htmlMode.isChecked())m.setContent(alternative);else m.setText(finalBody,"UTF-8");}
+      else{MimeMultipart multi=new MimeMultipart("mixed");MimeBodyPart messagePart=new MimeBodyPart();if(htmlMode.isChecked())messagePart.setContent(alternative);else messagePart.setText(finalBody,"UTF-8");multi.addBodyPart(messagePart);
         for(Uri uri:files){byte[] bytes;try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){
           if(in==null)throw new Exception("No se puede abrir el adjunto");byte[] buf=new byte[8192];int n;
           while((n=in.read(buf))!=-1){if(out.size()+n>25*1024*1024)throw new Exception("Archivo demasiado grande (máx. 25 MB)");out.write(buf,0,n);}bytes=out.toByteArray();}

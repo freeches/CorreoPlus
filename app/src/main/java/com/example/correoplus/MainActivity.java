@@ -548,9 +548,7 @@ public class MainActivity extends Activity {
       receivedAttachments.setVisibility(expand?View.VISIBLE:View.GONE);
       attachmentToggle.setText(expand?"📎 Adjuntos  ⌃":"📎 Adjuntos  ⌄");});
     if(configured)loadAttachments(folder,uid);
-    content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));
     content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
-    if(configured)content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));
     LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);
     root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
     addMessageAction(actions,"☆",()->toggleFavorite(folder,uid));
@@ -559,9 +557,30 @@ public class MainActivity extends Activity {
       addMessageAction(actions,"🗑",()->confirmMove(folder,uid,true));
       addMessageAction(actions,"↩",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,""));
       addMessageAction(actions,"↪",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body));
-      content.addView(button("Marcar como leído",()->setSeenBatch(folder,true,new ArrayList<>(java.util.Collections.singletonList(uid)))));
-      content.addView(button("Marcar como no leído",()->setSeenBatch(folder,false,new ArrayList<>(java.util.Collections.singletonList(uid)))));
+      addMessageMenu(actions,folder,uid,cached.seen);
     }
+  }
+  void addMessageMenu(LinearLayout bar,String folder,long uid,boolean seen){
+    TextView more=text("⋮",26);more.setGravity(android.view.Gravity.CENTER);
+    more.setContentDescription("Más acciones");
+    bar.addView(more,new LinearLayout.LayoutParams(0,56,1));
+    more.setOnClickListener(v->{MailCache.Item current=cache.get(lastAccount,folder,uid);showMessageOptions(more,folder,uid,current==null?seen:current.seen);});
+  }
+  void showMessageOptions(View anchor,String folder,long uid,boolean seen){
+    PopupMenu popup=new PopupMenu(this,anchor);
+    popup.getMenu().add(seen?"Marcar como no leído":"Marcar como leído");
+    popup.getMenu().add("Descargar contenido");
+    popup.getMenu().add("Ver HTML original");
+    popup.getMenu().add("Mover a carpeta (archivar)");
+    popup.setOnMenuItemClickListener(item->{
+      String choice=item.getTitle().toString();
+      if(choice.startsWith("Marcar como"))setSeenBatch(folder,!seen,new ArrayList<>(java.util.Collections.singletonList(uid)));
+      else if(choice.equals("Descargar contenido"))fetchBody(folder,uid);
+      else if(choice.equals("Ver HTML original"))showHtmlMessage(folder,uid);
+      else if(choice.startsWith("Mover a carpeta"))confirmMove(folder,uid,false);
+      return true;
+    });
+    popup.show();
   }
   void addMessageAction(LinearLayout bar,String label,Runnable action){
     TextView item=text(label,22);item.setGravity(android.view.Gravity.CENTER);

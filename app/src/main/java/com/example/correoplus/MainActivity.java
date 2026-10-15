@@ -321,8 +321,12 @@ public class MainActivity extends Activity {
       try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
         if(m==null)throw new Exception("Mensaje no disponible");String html=htmlBody(m,0);
         show(()->{if(html.isEmpty()){error("Este mensaje no tiene versión HTML.");return;}
-          layout("HTML seguro");content.addView(button("← Volver",()->openCachedMessage(folder,uid)));
-          content.addView(text("Imágenes externas y JavaScript bloqueados",13));
+          // A WebView must own the remaining screen height: nesting it in the
+          // message ScrollView with a fixed height cuts off long HTML messages.
+          root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+          root.setBackgroundColor(background());setContentView(root);
+          root.addView(button("← Volver al mensaje",()->openCachedMessage(folder,uid)));
+          root.addView(text("HTML · Imágenes externas y JavaScript bloqueados",13));
           WebView view=new WebView(this);view.getSettings().setJavaScriptEnabled(false);
           view.getSettings().setBlockNetworkLoads(true);view.getSettings().setAllowFileAccess(false);
           view.getSettings().setAllowContentAccess(false);
@@ -334,8 +338,15 @@ public class MainActivity extends Activity {
               return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
             }
           });
-          content.addView(view,new LinearLayout.LayoutParams(-1,900));
-          view.loadDataWithBaseURL(null,html,"text/html","UTF-8",null);
+          view.getSettings().setUseWideViewPort(true);
+          view.getSettings().setLoadWithOverviewMode(true);
+          view.getSettings().setBuiltInZoomControls(true);
+          view.getSettings().setDisplayZoomControls(false);
+          root.addView(view,new LinearLayout.LayoutParams(-1,0,1f));
+          String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+          String safeHtml=html.replaceFirst("(?i)<head[^>]*>","$0"+viewport);
+          if(safeHtml.equals(html))safeHtml=viewport+html;
+          view.loadDataWithBaseURL(null,safeHtml,"text/html","UTF-8",null);
         });
       }finally{f.close(false);}}finally{st.close();}});
   }

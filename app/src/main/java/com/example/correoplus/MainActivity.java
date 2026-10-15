@@ -181,6 +181,10 @@ public class MainActivity extends Activity {
   defaultHtml.setChecked(prefs.getBoolean("default_html",false));
   content.addView(defaultHtml);
   defaultHtml.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("default_html",checked).apply());
+  CheckBox inlineImages=new CheckBox(this);inlineImages.setText("Mostrar imágenes incrustadas en HTML (CID)");inlineImages.setTextColor(foreground());inlineImages.setChecked(prefs.getBoolean("inline_images",true));content.addView(inlineImages);
+  inlineImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("inline_images",checked).apply());
+  CheckBox remoteImages=new CheckBox(this);remoteImages.setText("Permitir imágenes externas (pueden revelar la apertura del correo)");remoteImages.setTextColor(foreground());remoteImages.setChecked(prefs.getBoolean("remote_images",false));content.addView(remoteImages);
+  remoteImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("remote_images",checked).apply());
   content.addView(text("Firma automática (se añade al enviar)",14));
   EditText signature=input(content,"Tu firma",prefs.getString("signature",""),false);
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
@@ -466,6 +470,37 @@ public class MainActivity extends Activity {
     }
     return "";
   }
+  static class InlineImage {
+    final String cid,type;final byte[] bytes;
+    InlineImage(String id,String mime,byte[] data){cid=id;type=mime;bytes=data;}
+  }
+  String cleanCid(String value){return value==null?"":value.trim().replace("<","").replace(">","");}
+  void collectInlineImages(Part part,int depth,ArrayList<InlineImage> images)throws Exception{
+    if(depth>12)return;
+    String cid=cleanCid(part.getHeader("Content-ID")!=null&&part.getHeader("Content-ID").length>0?part.getHeader("Content-ID")[0]:null);
+    if(!cid.isEmpty()&&part.getContentType().toLowerCase(Locale.ROOT).startsWith("image/")){
+      try(InputStream in=part.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+        byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){if(out.size()+n>2*1024*1024){out.reset();break;}out.write(buffer,0,n);}
+        if(out.size()>0)images.add(new InlineImage(cid,part.getContentType().split(";")[0],out.toByteArray()));
+      }
+    }
+    if(part.isMimeType("multipart/*")){
+      Object obj=part.getContent();if(obj instanceof Multipart){Multipart mp=(Multipart)obj;
+        for(int i=0;i<mp.getCount();i++)collectInlineImages(mp.getBodyPart(i),depth+1,images);
+      }
+    }
+  }
+  String embedInlineImages(String html,ArrayList<InlineImage> images){
+    for(InlineImage item:images){String data="data:"+item.type+";base64,"+android.util.Base64.encodeToString(item.bytes,android.util.Base64.NO_WRAP);
+      html=html.replace("cid:"+item.cid,data).replace("CID:"+item.cid,data);
+    }return html;
+  }
+  String htmlFragment(String html){
+    if(html==null)return "";
+    html=html.replaceAll("(?is)<!doctype[^>]*>","").replaceAll("(?is)<script\\b[^>]*>.*?</script>","");
+    html=html.replaceAll("(?is)^.*?<body[^>]*>","").replaceAll("(?is)</body>.*$","");
+    return html;
+  }
   // Keep the message header, expandable recipients/attachments and fixed action bar.
   // Only the body region is replaced when switching between plain text and HTML.
   LinearLayout messageBodySlot;
@@ -481,13 +516,16 @@ public class MainActivity extends Activity {
       try{Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
         if(m==null)throw new Exception("Mensaje no disponible");
         String html=htmlBody(m,0);
+        ArrayList<InlineImage> embedded=new ArrayList<>();
+        if(prefs.getBoolean("inline_images",true))collectInlineImages(m,0,embedded);
+        final String displayHtml=prefs.getBoolean("inline_images",true)?embedInlineImages(html,embedded):html;
         show(()->{
           if(slot!=messageBodySlot||!folder.equals(displayedFolder)||uid!=displayedUid)return;
           if(html.isEmpty()){Toast.makeText(this,"Este correo no tiene versión HTML",Toast.LENGTH_LONG).show();return;}
           slot.removeAllViews();
           WebView view=new WebView(this);
           view.getSettings().setJavaScriptEnabled(false);
-          view.getSettings().setBlockNetworkLoads(true);
+          view.getSettings().setBlockNetworkLoads(!prefs.getBoolean("remote_images",false));
           view.getSettings().setAllowFileAccess(false);
           view.getSettings().setAllowContentAccess(false);
           view.getSettings().setUseWideViewPort(true);
@@ -502,6 +540,9 @@ public class MainActivity extends Activity {
               try{startActivity(new Intent(Intent.ACTION_VIEW,req.getUrl()));}catch(Exception ignored){}return true;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
+              String scheme=req.getUrl().getScheme();
+              if("data".equalsIgnoreCase(scheme))return null;
+              if(prefs.getBoolean("remote_images",false)&&"https".equalsIgnoreCase(scheme))return null;
               return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
             }
           });
@@ -528,8 +569,8 @@ public class MainActivity extends Activity {
             "img,video,iframe{max-width:100%!important;height:auto!important;}"+
             "table{max-width:100%!important;}pre{white-space:pre-wrap;overflow-wrap:anywhere;}"+
             "</style>";
-          String safeHtml=html.replaceFirst("(?i)<head[^>]*>","$0"+viewport+responsive);
-          if(safeHtml.equals(html))safeHtml=viewport+responsive+html;
+          String safeHtml=displayHtml.replaceFirst("(?i)<head[^>]*>","$0"+viewport+responsive);
+          if(safeHtml.equals(displayHtml))safeHtml=viewport+responsive+displayHtml;
           view.loadDataWithBaseURL(null,safeHtml,"text/html","UTF-8",null);
           htmlVisible=true;
         });
@@ -770,6 +811,8 @@ public class MainActivity extends Activity {
           String subject=decode(original.getSubject());
           String quoted=body(original,0);
           String quotedHtml=htmlPart(original,0);
+          ArrayList<InlineImage> quotedImages=new ArrayList<>();
+          if(quotedHtml!=null)collectInlineImages(original,0,quotedImages);
           String from=recipientList(original.getFrom());
           String to=recipientList(original.getRecipients(Message.RecipientType.TO));
           String cc=recipientList(original.getRecipients(Message.RecipientType.CC));
@@ -803,9 +846,10 @@ public class MainActivity extends Activity {
           String cleanSubject=subject.replaceFirst("(?i)^(re|fwd|fw):\\s*","");
           final String finalTo=toValue,finalCc=ccValue,finalDraft=draft,finalSubject=prefix+cleanSubject;
           final String finalQuoteHtml=quotedHtml,finalQuoteHeader=quoteHeader;
+          final ArrayList<InlineImage> finalImages=quotedImages;
           final String finalId=messageId,finalRefs=references;
           show(()->composeAdvanced(finalTo,finalCc,finalSubject,finalDraft,
-              "forward".equals(mode)?null:finalId,"forward".equals(mode)?null:finalRefs,finalQuoteHtml,finalQuoteHeader));
+              "forward".equals(mode)?null:finalId,"forward".equals(mode)?null:finalRefs,finalQuoteHtml,finalQuoteHeader,finalImages));
         }finally{f.close(false);}
       }finally{store.close();}
     });
@@ -856,9 +900,9 @@ public class MainActivity extends Activity {
     });
   }
   void compose(String toValue,String subjectValue,String bodyValue){
-    composeAdvanced(toValue,"",subjectValue,bodyValue,null,null,null,null);
+    composeAdvanced(toValue,"",subjectValue,bodyValue,null,null,null,null,new ArrayList<InlineImage>());
   }
-  void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references,String quotedHtml,String quoteHeader){
+  void composeAdvanced(String toValue,String ccValue,String subjectValue,String bodyValue,String replyId,String references,String quotedHtml,String quoteHeader,ArrayList<InlineImage> quotedImages){
     outgoingAttachments.clear();layout("Redactar");
     EditText to=input(content,"Para",toValue,false),cc=input(content,"CC (copia)",ccValue,false),subject=input(content,"Asunto",subjectValue,false);
     boolean initialHtml=prefs.getBoolean("default_html",false);
@@ -889,11 +933,28 @@ public class MainActivity extends Activity {
     attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
       String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+signature);
       String formatted=android.text.Html.toHtml(body.getText(),android.text.Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL);
-      String finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"</body></html>";
+      // Preserve the original MIME HTML verbatim instead of round-tripping through Html.fromHtml/toHtml.
+      String finalHtml;
+      if(htmlMode.isChecked()&&quotedHtml!=null&&quoteHeader!=null){
+        String editorText=body.getText().toString();int headerPos=editorText.indexOf(quoteHeader);
+        String newText=headerPos>=0?editorText.substring(0,headerPos):editorText;
+        String newHtml=htmlEscape(newText);
+        finalHtml="<html><body>"+newHtml+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"<hr><p>"+htmlEscape(quoteHeader)+"</p>"+htmlFragment(quotedHtml)+"</body></html>";
+      }else finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"</body></html>";
       ArrayList<Uri> files=new ArrayList<>(outgoingAttachments);
       MimeMultipart alternative=new MimeMultipart("alternative");
       MimeBodyPart plain=new MimeBodyPart();plain.setText(finalBody,"UTF-8");alternative.addBodyPart(plain);
-      MimeBodyPart rich=new MimeBodyPart();rich.setContent(finalHtml,"text/html; charset=UTF-8");alternative.addBodyPart(rich);
+      MimeBodyPart rich=new MimeBodyPart();
+      if(htmlMode.isChecked()&&quotedHtml!=null&&!quotedImages.isEmpty()){
+        MimeMultipart related=new MimeMultipart("related");
+        MimeBodyPart htmlPartBody=new MimeBodyPart();htmlPartBody.setContent(finalHtml,"text/html; charset=UTF-8");related.addBodyPart(htmlPartBody);
+        for(InlineImage inline:quotedImages){MimeBodyPart imagePart=new MimeBodyPart();
+          imagePart.setDataHandler(new javax.activation.DataHandler(new javax.mail.util.ByteArrayDataSource(inline.bytes,inline.type)));
+          imagePart.setHeader("Content-ID","<"+inline.cid+">");imagePart.setDisposition(Part.INLINE);related.addBodyPart(imagePart);
+        }
+        rich.setContent(related);
+      }else rich.setContent(finalHtml,"text/html; charset=UTF-8");
+      alternative.addBodyPart(rich);
       if(files.isEmpty()){if(htmlMode.isChecked())m.setContent(alternative);else m.setText(finalBody,"UTF-8");}
       else{MimeMultipart multi=new MimeMultipart("mixed");MimeBodyPart messagePart=new MimeBodyPart();if(htmlMode.isChecked())messagePart.setContent(alternative);else messagePart.setText(finalBody,"UTF-8");multi.addBodyPart(messagePart);
         for(Uri uri:files){byte[] bytes;try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){

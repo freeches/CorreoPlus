@@ -43,3 +43,11 @@ Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y 
 - Timeout de lectura IMAP aumentado a 45 segundos.
 - No cambia la configuración de la cuenta ni el editor HTML.
 - Limitación: el icono de adjuntos puede aparecer tras abrir el mensaje, y el contador refleja los mensajes guardados, no el total del servidor.
+
+
+## V1.1.6 Beta
+- Preferencias independientes: imágenes incrustadas CID (activadas) e imágenes remotas (desactivadas).
+- Vista HTML: CID locales embebidos como data URI; imágenes remotas HTTPS solo con consentimiento.
+- Respuestas/reenvíos HTML: conservan el fragmento HTML original y adjuntan imágenes CID como multipart/related.
+- Límite de 2 MB por imagen incrustada. El editor Android muestra una aproximación editable; el original enviado se conserva en HTML.
+- Sin cambios en la sincronización por bloques de V1.1.5.

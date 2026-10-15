@@ -51,3 +51,10 @@ Extraer ZIP, copiar contenidos al repositorio, MGit Stage → Commit → Push y 
 - Respuestas/reenvíos HTML: conservan el fragmento HTML original y adjuntan imágenes CID como multipart/related.
 - Límite de 2 MB por imagen incrustada. El editor Android muestra una aproximación editable; el original enviado se conserva en HTML.
 - Sin cambios en la sincronización por bloques de V1.1.5.
+
+
+## V1.1.7 Beta — navegación HTML
+- La vista HTML tiene controles «Inicio HTML» y «Final HTML» para saltar al comienzo o al final incluso en mensajes largos.
+- Se refuerza el control de gestos para que el ScrollView exterior no intercepte el desplazamiento del WebView.
+- Se amplía el espacio de lectura HTML al 72 % de la altura de pantalla.
+- Se mantienen las funciones de V1.1.6.

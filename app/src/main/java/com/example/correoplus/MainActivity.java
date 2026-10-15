@@ -554,15 +554,29 @@ public class MainActivity extends Activity {
           view.setOnTouchListener((v,event)->{
             if(event.getActionMasked()==android.view.MotionEvent.ACTION_DOWN ||
                event.getActionMasked()==android.view.MotionEvent.ACTION_MOVE){
-              v.getParent().requestDisallowInterceptTouchEvent(true);
+              // Explicitly prevent the parent message scroller from stealing
+              // vertical gestures intended for the HTML document.
+              android.view.ViewParent parent=v.getParent();
+              while(parent!=null){parent.requestDisallowInterceptTouchEvent(true);parent=parent.getParent();}
             }else if(event.getActionMasked()==android.view.MotionEvent.ACTION_UP ||
                      event.getActionMasked()==android.view.MotionEvent.ACTION_CANCEL){
-              v.getParent().requestDisallowInterceptTouchEvent(false);
+              android.view.ViewParent parent=v.getParent();
+              while(parent!=null){parent.requestDisallowInterceptTouchEvent(false);parent=parent.getParent();}
             }
             return false;
           });
-          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.64f);
+          // Keep the WebView scroll independent of the outer message ScrollView.
+          // The HTML has its own scrollable viewport, plus explicit navigation
+          // buttons so long newsletters and quoted conversations always reach the end.
+          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.72f);
           slot.addView(view,new LinearLayout.LayoutParams(-1,Math.max(htmlHeight,300)));
+          LinearLayout htmlNavigation=new LinearLayout(this);
+          htmlNavigation.setOrientation(LinearLayout.HORIZONTAL);
+          Button htmlTop=button("↑ Inicio HTML",()->view.post(()->view.pageUp(true)));
+          Button htmlBottom=button("↓ Final HTML",()->view.post(()->view.pageDown(true)));
+          htmlNavigation.addView(htmlTop,new LinearLayout.LayoutParams(0,-2,1));
+          htmlNavigation.addView(htmlBottom,new LinearLayout.LayoutParams(0,-2,1));
+          slot.addView(htmlNavigation,new LinearLayout.LayoutParams(-1,-2));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
           // Scale wide email layouts to the phone while retaining readable tables.
           String responsive="<style>html,body{max-width:100%!important;overflow-wrap:anywhere;word-wrap:break-word;}"+

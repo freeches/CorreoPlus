@@ -760,8 +760,10 @@ public class MainActivity extends Activity {
           String to=recipientList(original.getRecipients(Message.RecipientType.TO));
           String cc=recipientList(original.getRecipients(Message.RecipientType.CC));
           String stamp=original.getSentDate()==null?"":original.getSentDate().toString();
-          String messageId=original.getHeader("Message-ID",null);
-          String references=original.getHeader("References",null);
+          String[] messageIdHeaders=original.getHeader("Message-ID");
+          String messageId=(messageIdHeaders!=null && messageIdHeaders.length>0)?messageIdHeaders[0]:null;
+          String[] referencesHeaders=original.getHeader("References");
+          String references=(referencesHeaders!=null && referencesHeaders.length>0)?referencesHeaders[0]:null;
           String toValue="",ccValue="";
           if(!"forward".equals(mode)){
             LinkedHashMap<String,InternetAddress> recipients=new LinkedHashMap<>();

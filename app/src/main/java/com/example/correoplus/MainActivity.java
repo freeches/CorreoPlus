@@ -477,7 +477,21 @@ public class MainActivity extends Activity {
     if(!"—".equals(cc))combined+=(combined.isEmpty()?"":", ")+cc.replace("\n",", ");
     return combined.isEmpty()?"Destinatarios no disponibles":"Para: "+combined;
   }
-  void loadMessageRecipients(String folder,long uid,TextView summary,TextView details){
+  void addRecipientRows(LinearLayout parent,String title,Address[] addresses){
+    parent.addView(text(title,14));
+    if(addresses==null||addresses.length==0){parent.addView(text("—",14));return;}
+    for(Address address:addresses){
+      String name=address instanceof InternetAddress?((InternetAddress)address).getPersonal():null;
+      String email=address instanceof InternetAddress?((InternetAddress)address).getAddress():address.toString();
+      LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);
+      row.setPadding(18,5,8,9);
+      if(name!=null&&!name.trim().isEmpty()){
+        TextView nameView=text(decode(name),15);nameView.setTypeface(null,Typeface.BOLD);row.addView(nameView);
+      }
+      row.addView(text(email==null?"—":email,14));parent.addView(row);
+    }
+  }
+  void loadMessageRecipients(String folder,long uid,TextView summary,LinearLayout details){
     work(()->{
       Store store=connect();
       try{
@@ -490,10 +504,14 @@ public class MainActivity extends Activity {
           String cc=recipientList(m.getRecipients(Message.RecipientType.CC));
           String bcc=recipientList(m.getRecipients(Message.RecipientType.BCC));
           String date=m.getSentDate()==null?"—":new java.text.SimpleDateFormat("dd MMM yyyy, HH:mm",java.util.Locale.getDefault()).format(m.getSentDate());
-          String info="Fecha: "+date+"\n\nDe: "+from+"\n\nPara: "+to+"\n\nCC: "+cc;
-          if(!"—".equals(bcc))info+="\n\nCCO: "+bcc;
-          final String shown=info,brief=summaryRecipients(to,cc);
-          show(()->{if(summary.getParent()!=null){summary.setText(brief);details.setText(shown);}});
+          final String brief=summaryRecipients(to,cc);
+          final Address[] fromAddresses=m.getFrom(),toAddresses=m.getRecipients(Message.RecipientType.TO),ccAddresses=m.getRecipients(Message.RecipientType.CC),bccAddresses=m.getRecipients(Message.RecipientType.BCC);
+          show(()->{if(summary.getParent()!=null){
+            summary.setText(brief);details.removeAllViews();details.addView(text("Fecha: "+date,14));
+            addRecipientRows(details,"De:",fromAddresses);addRecipientRows(details,"Para:",toAddresses);
+            addRecipientRows(details,"CC:",ccAddresses);
+            if(bccAddresses!=null&&bccAddresses.length>0)addRecipientRows(details,"CCO:",bccAddresses);
+          }});
         }finally{f.close(false);}
       }finally{store.close();}
     });
@@ -513,13 +531,23 @@ public class MainActivity extends Activity {
     header.addView(senderColumn,new LinearLayout.LayoutParams(0,-2,1));
     TextView toggle=text("⌄",26);toggle.setContentDescription("Mostrar u ocultar destinatarios");header.addView(toggle);
     content.addView(header);
-    TextView details=text("De: "+cached.from+"\n\nPara y CC: cargando…",14);
+    LinearLayout details=new LinearLayout(this);details.setOrientation(LinearLayout.VERTICAL);
+    details.setPadding(14,12,14,12);details.addView(text("De: "+cached.from+"\nPara y CC: cargando…",14));
     details.setBackgroundColor(darkMode?Color.rgb(43,54,68):Color.rgb(245,247,250));
     details.setVisibility(View.GONE);content.addView(details);
     header.setOnClickListener(v->{boolean expand=details.getVisibility()!=View.VISIBLE;details.setVisibility(expand?View.VISIBLE:View.GONE);toggle.setText(expand?"⌃":"⌄");});
     if(configured)loadMessageRecipients(folder,uid,summary,details);
+    LinearLayout attachmentSection=new LinearLayout(this);attachmentSection.setOrientation(LinearLayout.VERTICAL);
+    TextView attachmentToggle=text("📎 Adjuntos  ⌄",17);
+    attachmentToggle.setContentDescription("Mostrar u ocultar adjuntos");
+    attachmentSection.addView(attachmentToggle);
     receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);
-    content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);
+    receivedAttachments.setVisibility(View.GONE);
+    attachmentSection.addView(receivedAttachments);content.addView(attachmentSection);
+    attachmentToggle.setOnClickListener(v->{boolean expand=receivedAttachments.getVisibility()!=View.VISIBLE;
+      receivedAttachments.setVisibility(expand?View.VISIBLE:View.GONE);
+      attachmentToggle.setText(expand?"📎 Adjuntos  ⌃":"📎 Adjuntos  ⌄");});
+    if(configured)loadAttachments(folder,uid);
     content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));
     content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
     if(configured)content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));

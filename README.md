@@ -9,3 +9,9 @@ Basado en V1.0.2. Una sola cuenta.
 - Adjuntos y lectura HTML existentes conservados.
 
 Compilar con GitHub Actions. La compilación y el funcionamiento en Android no se han verificado localmente.
+
+
+## V1.0.4
+- Destinatarios en filas individuales, con nombre y dirección por separado, agrupados por De, Para, CC y CCO cuando existe.
+- Adjuntos en sección desplegable, inicialmente cerrada, con apertura y guardado al expandir.
+- Requiere compilación y pruebas en Android.

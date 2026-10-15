@@ -157,7 +157,7 @@ public class MainActivity extends Activity {
   TextView text(String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(foreground());t.setPadding(12,13,12,13);return t;}
   Button button(String name,Runnable run){Button b=new Button(this);b.setText(name);b.setAllCaps(false);b.setOnClickListener(v->run.run());return b;}
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
-  void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc);}
+  void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));}
   @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
     h=prefs.getString("imap_host",""); u=prefs.getString("username","");
     sh=prefs.getString("smtp_host","");
@@ -466,7 +466,18 @@ public class MainActivity extends Activity {
     }
     return result.toString();
   }
-  void loadMessageRecipients(String folder,long uid,TextView details){
+  String shortSender(String full){
+    if(full==null)return "Remitente";
+    String value=full.trim();int bracket=value.indexOf('<');
+    if(bracket>0)value=value.substring(0,bracket).trim().replace("\"","");
+    return value.isEmpty()?full:value;
+  }
+  String summaryRecipients(String to,String cc){
+    String combined="—".equals(to)?"":to.replace("\n",", ");
+    if(!"—".equals(cc))combined+=(combined.isEmpty()?"":", ")+cc.replace("\n",", ");
+    return combined.isEmpty()?"Destinatarios no disponibles":"Para: "+combined;
+  }
+  void loadMessageRecipients(String folder,long uid,TextView summary,TextView details){
     work(()->{
       Store store=connect();
       try{
@@ -478,18 +489,56 @@ public class MainActivity extends Activity {
           String to=recipientList(m.getRecipients(Message.RecipientType.TO));
           String cc=recipientList(m.getRecipients(Message.RecipientType.CC));
           String bcc=recipientList(m.getRecipients(Message.RecipientType.BCC));
-          String info="De: "+from+"\nPara: "+to+"\nCC: "+cc;
-          if(!"—".equals(bcc))info+="\nCCO: "+bcc;
-          final String shown=info;
-          show(()->details.setText(shown));
+          String date=m.getSentDate()==null?"—":new java.text.SimpleDateFormat("dd MMM yyyy, HH:mm",java.util.Locale.getDefault()).format(m.getSentDate());
+          String info="Fecha: "+date+"\n\nDe: "+from+"\n\nPara: "+to+"\n\nCC: "+cc;
+          if(!"—".equals(bcc))info+="\n\nCCO: "+bcc;
+          final String shown=info,brief=summaryRecipients(to,cc);
+          show(()->{if(summary.getParent()!=null){summary.setText(brief);details.setText(shown);}});
         }finally{f.close(false);}
       }finally{store.close();}
     });
   }
-  void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));TextView recipients=text("De: "+cached.from+"\nPara y CC: cargando…",15);content.addView(recipients);if(configured)loadMessageRecipients(folder,uid,recipients);
-    content.addView(button(isFavorite(folder,uid)?"★ Quitar de favoritos":"☆ Añadir a favoritos",()->toggleFavorite(folder,uid)));
-    if(configured){content.addView(button("✉ Marcar como leído",()->setSeenBatch(folder,true,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("✉ Marcar como no leído",()->setSeenBatch(folder,false,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("▣ Archivar",()->confirmMove(folder,uid,false)));content.addView(button("🗑 Eliminar",()->confirmMove(folder,uid,true)));}
-    receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
+  void openCachedMessage(String folder,long uid){
+    MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;
+    layout("Mensaje");
+    content.addView(button("← Volver",()->renderCached(folder)));
+    TextView subject=text(cached.subject,23);subject.setTypeface(null,Typeface.BOLD);content.addView(subject);
+    LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    TextView avatar=text(shortSender(cached.from).substring(0,1).toUpperCase(java.util.Locale.getDefault()),23);
+    avatar.setGravity(android.view.Gravity.CENTER);avatar.setTextColor(Color.WHITE);avatar.setBackgroundColor(blue);
+    LinearLayout.LayoutParams avatarLp=new LinearLayout.LayoutParams(58,58);avatarLp.setMargins(0,0,12,0);header.addView(avatar,avatarLp);
+    LinearLayout senderColumn=new LinearLayout(this);senderColumn.setOrientation(LinearLayout.VERTICAL);
+    TextView sender=text(shortSender(cached.from),18);sender.setTypeface(null,Typeface.BOLD);senderColumn.addView(sender);
+    TextView summary=text("Para y CC: cargando…",13);summary.setSingleLine(true);summary.setEllipsize(android.text.TextUtils.TruncateAt.END);senderColumn.addView(summary);
+    header.addView(senderColumn,new LinearLayout.LayoutParams(0,-2,1));
+    TextView toggle=text("⌄",26);toggle.setContentDescription("Mostrar u ocultar destinatarios");header.addView(toggle);
+    content.addView(header);
+    TextView details=text("De: "+cached.from+"\n\nPara y CC: cargando…",14);
+    details.setBackgroundColor(darkMode?Color.rgb(43,54,68):Color.rgb(245,247,250));
+    details.setVisibility(View.GONE);content.addView(details);
+    header.setOnClickListener(v->{boolean expand=details.getVisibility()!=View.VISIBLE;details.setVisibility(expand?View.VISIBLE:View.GONE);toggle.setText(expand?"⌃":"⌄");});
+    if(configured)loadMessageRecipients(folder,uid,summary,details);
+    receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);
+    content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);
+    content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));
+    content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));
+    if(configured)content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));
+    LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);
+    root.addView(actions,new LinearLayout.LayoutParams(-1,-2));
+    addMessageAction(actions,"☆",()->toggleFavorite(folder,uid));
+    if(configured){
+      addMessageAction(actions,"▣",()->confirmMove(folder,uid,false));
+      addMessageAction(actions,"🗑",()->confirmMove(folder,uid,true));
+      addMessageAction(actions,"↩",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,""));
+      addMessageAction(actions,"↪",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body));
+      content.addView(button("Marcar como leído",()->setSeenBatch(folder,true,new ArrayList<>(java.util.Collections.singletonList(uid)))));
+      content.addView(button("Marcar como no leído",()->setSeenBatch(folder,false,new ArrayList<>(java.util.Collections.singletonList(uid)))));
+    }
+  }
+  void addMessageAction(LinearLayout bar,String label,Runnable action){
+    TextView item=text(label,22);item.setGravity(android.view.Gravity.CENTER);
+    item.setOnClickListener(v->action.run());bar.addView(item,new LinearLayout.LayoutParams(0,56,1));
+  }
   void confirmMove(String folder,long uid,boolean delete){
     new AlertDialog.Builder(this).setTitle(delete?"Mover a Papelera":"Archivar mensaje")
       .setMessage("Esta operación moverá el mensaje en el servidor IMAP. ¿Continuar?")

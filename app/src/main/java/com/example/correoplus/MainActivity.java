@@ -294,6 +294,26 @@ public class MainActivity extends Activity {
     prefs.edit().putBoolean(key,!prefs.getBoolean(key,false)).apply();
     renderCached(folder);
   }
+  String senderDisplay(String raw){
+    if(raw==null||raw.trim().isEmpty())return "Remitente desconocido";
+    String value=raw.trim();int lt=value.indexOf('<');
+    if(lt>0){String name=value.substring(0,lt).trim().replace("\"","");if(!name.isEmpty())return name;}
+    return value;
+  }
+  String relativeMailDate(String raw){
+    if(raw==null||raw.isEmpty())return "";
+    try{
+      java.text.SimpleDateFormat parser=new java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy",java.util.Locale.ENGLISH);
+      parser.setLenient(true);Date d=parser.parse(raw);if(d==null)return raw;
+      Calendar now=Calendar.getInstance(),mail=Calendar.getInstance();mail.setTime(d);
+      java.text.SimpleDateFormat format;
+      if(now.get(Calendar.YEAR)==mail.get(Calendar.YEAR)&&now.get(Calendar.DAY_OF_YEAR)==mail.get(Calendar.DAY_OF_YEAR))format=new java.text.SimpleDateFormat("HH:mm",Locale.getDefault());
+      else {Calendar week=Calendar.getInstance();week.add(Calendar.DAY_OF_YEAR,-6);
+        if(!mail.before(week)&&!mail.after(now))format=new java.text.SimpleDateFormat("EEEE",Locale.getDefault());
+        else format=new java.text.SimpleDateFormat("dd/MM/yyyy",Locale.getDefault());}
+      return format.format(d);
+    }catch(Exception ex){return raw;}
+  }
   void renderSearch(LinearLayout target,String folder,String query){
     target.removeAllViews();
     ArrayList<MailCache.Item> rows=cache.search(lastAccount,folder,query);
@@ -311,25 +331,47 @@ public class MainActivity extends Activity {
       if(inboxFilter==1 && r.seen)continue;
       if(inboxFilter==2 && !isFavorite(folder,r.uid))continue;
       if(inboxFilter==3 && r.attachmentState!=1)continue;
-      String prefix=selectionMode?(selectedUids.contains(r.uid)?"☑ ":"☐ "):"";
-      TextView item=text(prefix+(isFavorite(folder,r.uid)?"★ ":"")+(r.seen?"":"● ")+(r.attachmentState==1?"📎 ":"")+r.from+"\n"+r.subject+"\n"+r.date,15);
-      item.setPadding(18,18,18,18);
+      LinearLayout item=new LinearLayout(this);
+      item.setOrientation(LinearLayout.VERTICAL);
+      item.setPadding(18,14,18,14);
       item.setBackgroundColor(selectedUids.contains(r.uid)?(darkMode?Color.rgb(52,78,110):Color.rgb(211,232,249)):(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252)));
+      String senderLabel=senderDisplay(r.from);
+      String prefix=selectionMode?(selectedUids.contains(r.uid)?"☑ ":"☐ "):"";
+      TextView senderView=text(prefix+(r.seen?"":"● ")+senderLabel,16);
+      senderView.setSingleLine(true);senderView.setEllipsize(TextUtils.TruncateAt.END);
+      senderView.setTypeface(null,r.seen?Typeface.NORMAL:Typeface.BOLD);
+      item.addView(senderView);
+      LinearLayout subjectRow=new LinearLayout(this);subjectRow.setOrientation(LinearLayout.HORIZONTAL);
+      TextView subjectView=text((isFavorite(folder,r.uid)?"★ ":"")+(r.attachmentState==1?"📎 ":"")+(r.subject==null?"(Sin asunto)":r.subject),14);
+      subjectView.setSingleLine(true);subjectView.setEllipsize(TextUtils.TruncateAt.END);
+      subjectRow.addView(subjectView,new LinearLayout.LayoutParams(0,-2,1));
+      TextView when=text(relativeMailDate(r.date),12);
+      when.setPadding(12,0,0,0);subjectRow.addView(when);
+      item.addView(subjectRow);
       LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
       target.addView(item,lp);
-      item.setOnLongClickListener(v->{selectionMode=true;selectedUids.add(r.uid);renderSearch(target,folder,query);return true;});
+      // Consume DOWN: otherwise Android triggers the native long-click before UP,
+      // incorrectly entering selection mode while a swipe is in progress.
       final float[] down={0,0};
+      final boolean[] swiping={false}, longPressed={false};
+      final Runnable longPress=()->{if(!swiping[0]&&!selectionMode){longPressed[0]=true;selectionMode=true;selectedUids.add(r.uid);renderSearch(target,folder,query);}};
       item.setOnTouchListener((v,event)->{
-        if(event.getAction()==MotionEvent.ACTION_DOWN){down[0]=event.getX();down[1]=event.getY();return false;}
-        if(event.getAction()==MotionEvent.ACTION_UP && !selectionMode){
+        int action=event.getActionMasked();
+        float threshold=65*getResources().getDisplayMetrics().density;
+        if(action==MotionEvent.ACTION_DOWN){down[0]=event.getX();down[1]=event.getY();swiping[0]=false;longPressed[0]=false;ui.postDelayed(longPress,android.view.ViewConfiguration.getLongPressTimeout());return true;}
+        if(action==MotionEvent.ACTION_MOVE){float dx=event.getX()-down[0],dy=event.getY()-down[1];
+          if(Math.abs(dx)>20*getResources().getDisplayMetrics().density||Math.abs(dy)>20*getResources().getDisplayMetrics().density)ui.removeCallbacks(longPress);
+          if(Math.abs(dx)>threshold&&Math.abs(dx)>Math.abs(dy)*1.3f)swiping[0]=true;
+          return swiping[0];}
+        if(action==MotionEvent.ACTION_CANCEL){ui.removeCallbacks(longPress);return true;}
+        if(action==MotionEvent.ACTION_UP){ui.removeCallbacks(longPress);if(longPressed[0])return true;
           float dx=event.getX()-down[0],dy=event.getY()-down[1];
-          if(Math.abs(dx)>110*getResources().getDisplayMetrics().density && Math.abs(dx)>Math.abs(dy)*1.5f){
-            confirmMove(folder,r.uid,dx>0?false:true);return true;
-          }
-        }
-        return false;
+          if(!selectionMode&&Math.abs(dx)>threshold&&Math.abs(dx)>Math.abs(dy)*1.3f){confirmMove(folder,r.uid,dx<0);return true;}
+          if(Math.abs(dx)<20*getResources().getDisplayMetrics().density&&Math.abs(dy)<20*getResources().getDisplayMetrics().density){
+            if(selectionMode){if(!selectedUids.add(r.uid))selectedUids.remove(r.uid);renderSearch(target,folder,query);}else openCachedMessage(folder,r.uid);
+          }return true;
+        }return true;
       });
-      item.setOnClickListener(v->{if(selectionMode){if(!selectedUids.add(r.uid))selectedUids.remove(r.uid);renderSearch(target,folder,query);}else openCachedMessage(folder,r.uid);});
     }
   }
   void setSeenBatch(String folder,boolean seen,ArrayList<Long> ids){

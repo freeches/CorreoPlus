@@ -39,7 +39,32 @@ public final class MailCache extends SQLiteOpenHelper {
         }finally{db.endTransaction();}
     }
     private long validity(String account,String folder){try(Cursor c=getReadableDatabase().rawQuery("SELECT validity FROM folders WHERE account=? AND folder=?",new String[]{account,folder})){return c.moveToFirst()?c.getLong(0):-1;}}
-    public synchronized ArrayList<Item> list(String account,String folder){ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val)})){while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)));}return out;}
+    public synchronized ArrayList<Item> list(String account,String folder){ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? ORDER BY uid DESC LIMIT 100 OFFSET 0",new String[]{account,folder,String.valueOf(val)})){while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)));}return out;}
+    public synchronized int count(String account,String folder){
+        long val=validity(account,folder);
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM messages WHERE account=? AND folder=? AND validity=?",new String[]{account,folder,String.valueOf(val)})){return c.moveToFirst()?c.getInt(0):0;}
+    }
+    public synchronized ArrayList<Item> page(String account,String folder,int offset,int limit){
+        ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? ORDER BY uid DESC LIMIT ? OFFSET ?",new String[]{account,folder,String.valueOf(val),String.valueOf(Math.max(1,Math.min(limit,100))),String.valueOf(Math.max(0,offset))})){
+            while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)));
+        }return out;
+    }
+    public synchronized ArrayList<Item> advancedSearch(String account,String folder,String sender,String subject,String after,boolean attachmentsOnly,int offset){
+        ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);
+        StringBuilder sql=new StringBuilder("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=?");
+        ArrayList<String> args=new ArrayList<>();args.add(account);args.add(folder);args.add(String.valueOf(val));
+        if(!sender.isEmpty()){sql.append(" AND sender LIKE ? ESCAPE '\\'");args.add("%"+escapeLike(sender)+"%");}
+        if(!subject.isEmpty()){sql.append(" AND subject LIKE ? ESCAPE '\\'");args.add("%"+escapeLike(subject)+"%");}
+        if(attachmentsOnly)sql.append(" AND has_attachments=1");
+        sql.append(" ORDER BY uid DESC LIMIT 100 OFFSET ?");args.add(String.valueOf(Math.max(0,offset)));
+        try(Cursor c=getReadableDatabase().rawQuery(sql.toString(),args.toArray(new String[0]))){while(c.moveToNext()){
+            Item item=new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6));
+            if(!after.isEmpty()){try{java.util.Date date=new java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy",java.util.Locale.ENGLISH).parse(item.date);if(date==null||date.before(new java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.ROOT).parse(after)))continue;}catch(Exception ignored){continue;}}
+            out.add(item);
+        }}return out;
+    }
+    private String escapeLike(String s){return s.replace("\\","\\\\").replace("%","\\%").replace("_","\\_");}
     public synchronized Item get(String account,String folder,long uid){
         long val=validity(account,folder);
         try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? AND uid=? LIMIT 1",new String[]{account,folder,String.valueOf(val),String.valueOf(uid)})){

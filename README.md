@@ -1,11 +1,10 @@
-# CorreoPlus V1.0.9 Beta
+# CorreoPlus V1.1 Beta
 
-Base: V1.0.8, una sola cuenta.
+Basado en V1.0.9. Una sola cuenta.
 
-- Botones «Más reciente» y «Más antiguo» al abrir un mensaje, usando el orden de la caché local (hasta los 100 mensajes visibles de la carpeta). No requieren nueva conexión IMAP.
-- HTML adaptable: viewport, imágenes y contenido multimedia limitados al ancho de pantalla, texto largo ajustado, tablas con ancho máximo. Algunas tablas con anchuras rígidas todavía pueden necesitar zoom horizontal.
-- Lectura individual de caché SQLite por clave, sin cargar toda la lista para abrir un mensaje.
-- Se conserva la cabecera y la barra inferior fija, en vista normal y HTML.
+- Caché y bandeja paginadas en bloques de 100 mensajes; hasta 500 cabeceras recientes por sincronización.
+- Búsqueda avanzada local por remitente, asunto, fecha desde y presencia de adjuntos.
+- Mover mensajes seleccionados a carpetas IMAP existentes.
+- Se mantienen HTML, adjuntos, acciones fijas y sincronización incremental por UID.
 
-## Instalación
-Extraer el ZIP, copiar archivos al repositorio, MGit Stage / Commit / Push y comprobar GitHub Actions. No se ha probado la compilación ni la instalación Android en este entorno.
+Limitaciones: la sincronización trae como máximo 500 cabeceras recientes por ejecución, no todo el histórico del servidor; la búsqueda por fecha filtra los resultados de la página recuperada, por lo que puede omitir coincidencias de páginas posteriores. No se ha verificado la compilación Android.

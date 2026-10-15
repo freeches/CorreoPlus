@@ -40,7 +40,12 @@ public final class MailCache extends SQLiteOpenHelper {
     }
     private long validity(String account,String folder){try(Cursor c=getReadableDatabase().rawQuery("SELECT validity FROM folders WHERE account=? AND folder=?",new String[]{account,folder})){return c.moveToFirst()?c.getLong(0):-1;}}
     public synchronized ArrayList<Item> list(String account,String folder){ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? ORDER BY uid DESC LIMIT 100",new String[]{account,folder,String.valueOf(val)})){while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)));}return out;}
-    public synchronized Item get(String account,String folder,long uid){for(Item i:list(account,folder))if(i.uid==uid)return i;return null;}
+    public synchronized Item get(String account,String folder,long uid){
+        long val=validity(account,folder);
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=? AND uid=? LIMIT 1",new String[]{account,folder,String.valueOf(val),String.valueOf(uid)})){
+            return c.moveToFirst()?new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)):null;
+        }
+    }
     public synchronized void remove(String account,String folder,long uid){
         getWritableDatabase().delete("messages","account=? AND folder=? AND validity=? AND uid=?",new String[]{account,folder,String.valueOf(validity(account,folder)),String.valueOf(uid)});
     }

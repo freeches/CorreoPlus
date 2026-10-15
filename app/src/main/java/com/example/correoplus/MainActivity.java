@@ -473,8 +473,13 @@ public class MainActivity extends Activity {
           });
           slot.addView(view,new LinearLayout.LayoutParams(-1,(int)(400*getResources().getDisplayMetrics().density)));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-          String safeHtml=html.replaceFirst("(?i)<head[^>]*>","$0"+viewport);
-          if(safeHtml.equals(html))safeHtml=viewport+html;
+          // Scale wide email layouts to the phone while retaining readable tables.
+          String responsive="<style>html,body{max-width:100%!important;overflow-wrap:anywhere;word-wrap:break-word;}"+
+            "img,video,iframe{max-width:100%!important;height:auto!important;}"+
+            "table{max-width:100%!important;}pre{white-space:pre-wrap;overflow-wrap:anywhere;}"+
+            "</style>";
+          String safeHtml=html.replaceFirst("(?i)<head[^>]*>","$0"+viewport+responsive);
+          if(safeHtml.equals(html))safeHtml=viewport+responsive+html;
           view.loadDataWithBaseURL(null,safeHtml,"text/html","UTF-8",null);
           htmlVisible=true;
         });
@@ -561,6 +566,23 @@ public class MainActivity extends Activity {
     ScrollView messageScroll=(ScrollView)root.getChildAt(1);
     int actionHeight=(int)(76*getResources().getDisplayMetrics().density+0.5f);
     content.addView(button("← Volver",()->renderCached(folder)));
+    // Navigation uses the already cached folder ordering, without extra IMAP requests.
+    ArrayList<MailCache.Item> nearby=cache.list(lastAccount,folder);
+    int position=-1;
+    for(int i=0;i<nearby.size();i++)if(nearby.get(i).uid==uid){position=i;break;}
+    if(position>=0){
+      LinearLayout navigation=new LinearLayout(this);
+      navigation.setOrientation(LinearLayout.HORIZONTAL);
+      final long newer=position>0?nearby.get(position-1).uid:-1;
+      final long older=position+1<nearby.size()?nearby.get(position+1).uid:-1;
+      Button newerButton=button("← Más reciente",()->openCachedMessage(folder,newer));
+      newerButton.setEnabled(newer!=-1);
+      navigation.addView(newerButton,new LinearLayout.LayoutParams(0,-2,1));
+      Button olderButton=button("Más antiguo →",()->openCachedMessage(folder,older));
+      olderButton.setEnabled(older!=-1);
+      navigation.addView(olderButton,new LinearLayout.LayoutParams(0,-2,1));
+      content.addView(navigation);
+    }
     TextView subject=text(cached.subject,23);subject.setTypeface(null,Typeface.BOLD);content.addView(subject);
     LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(android.view.Gravity.CENTER_VERTICAL);
     TextView avatar=text(shortSender(cached.from).substring(0,1).toUpperCase(java.util.Locale.getDefault()),23);

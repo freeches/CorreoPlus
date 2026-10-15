@@ -20,3 +20,7 @@ Extraer el ZIP en el repositorio de GitHub, hacer Stage/Commit/Push con MGit y d
 - Gestos horizontales corregidos: derecha archivar, izquierda Papelera. Pulsación prolongada selecciona.
 - Bandeja en dos líneas: remitente; asunto y fecha/hora. Hoy HH:mm, últimos 6 días día de semana, anteriores dd/MM/yyyy.
 - Sin cambios en la base de datos ni en las credenciales.
+
+
+## V1.0.2
+Muestra De, todos los Para, CC y CCO cuando el servidor incluye esa cabecera. Se consultan los destinatarios al abrir el correo, por lo que requieren conexión. En mensajes recibidos normalmente no se conoce CCO.

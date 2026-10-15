@@ -457,7 +457,36 @@ public class MainActivity extends Activity {
     else editor.getText().setSpan(new StyleSpan(style==1?Typeface.BOLD:Typeface.ITALIC),a,b,Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
   }
   String htmlEscape(String value){return android.text.TextUtils.htmlEncode(value).replace("\n","<br>");}
-  void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));content.addView(text("De: "+cached.from,15));
+  String recipientList(Address[] addresses){
+    if(addresses==null||addresses.length==0)return "—";
+    StringBuilder result=new StringBuilder();
+    for(Address address:addresses){
+      if(result.length()>0)result.append("\n");
+      result.append(decode(address.toString()));
+    }
+    return result.toString();
+  }
+  void loadMessageRecipients(String folder,long uid,TextView details){
+    work(()->{
+      Store store=connect();
+      try{
+        Folder f=store.getFolder(folder);f.open(Folder.READ_ONLY);
+        try{
+          Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
+          if(m==null)throw new Exception("Mensaje no disponible");
+          String from=recipientList(m.getFrom());
+          String to=recipientList(m.getRecipients(Message.RecipientType.TO));
+          String cc=recipientList(m.getRecipients(Message.RecipientType.CC));
+          String bcc=recipientList(m.getRecipients(Message.RecipientType.BCC));
+          String info="De: "+from+"\nPara: "+to+"\nCC: "+cc;
+          if(!"—".equals(bcc))info+="\nCCO: "+bcc;
+          final String shown=info;
+          show(()->details.setText(shown));
+        }finally{f.close(false);}
+      }finally{store.close();}
+    });
+  }
+  void openCachedMessage(String folder,long uid){MailCache.Item cached=cache.get(lastAccount,folder,uid);if(cached==null)return;layout("Mensaje");content.addView(button("← Volver",()->renderCached(folder)));content.addView(text(cached.subject,22));TextView recipients=text("De: "+cached.from+"\nPara y CC: cargando…",15);content.addView(recipients);if(configured)loadMessageRecipients(folder,uid,recipients);
     content.addView(button(isFavorite(folder,uid)?"★ Quitar de favoritos":"☆ Añadir a favoritos",()->toggleFavorite(folder,uid)));
     if(configured){content.addView(button("✉ Marcar como leído",()->setSeenBatch(folder,true,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("✉ Marcar como no leído",()->setSeenBatch(folder,false,new ArrayList<>(java.util.Collections.singletonList(uid)))));content.addView(button("▣ Archivar",()->confirmMove(folder,uid,false)));content.addView(button("🗑 Eliminar",()->confirmMove(folder,uid,true)));}
     receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);content.addView(receivedAttachments);if(configured)loadAttachments(folder,uid);content.addView(button("🌐 Ver HTML original",()->showHtmlMessage(folder,uid)));content.addView(text(cached.body==null?"Contenido todavía no descargado. Conéctate para leerlo.":cached.body,16));if(configured){content.addView(button("↻ Descargar contenido",()->fetchBody(folder,uid)));content.addView(button("↩ Responder",()->compose(cached.from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+cached.subject,"")));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+cached.subject,cached.body==null?"":cached.body)));}}
@@ -486,7 +515,7 @@ public class MainActivity extends Activity {
 
   void renderMessages(String folder,int total,ArrayList<String[]> rows){menu();content.addView(text(folder+" · "+total+" mensajes",19));content.addView(button("↻ Actualizar",()->openFolder(folder)));for(String[] r:rows){TextView item=text(r[4]+r[1]+"\n"+r[2]+"\n"+r[3],15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openMessage(folder,Integer.parseInt(r[0])));}}
   String body(Part part,int depth)throws Exception{if(depth>8)return "";if(part.isMimeType("text/plain")){Object c=part.getContent();return c==null?"":c.toString();}if(part.isMimeType("text/html")){Object c=part.getContent();return c==null?"":android.text.Html.fromHtml(c.toString(),android.text.Html.FROM_HTML_MODE_LEGACY).toString();}Object c=part.getContent();if(c instanceof Multipart){Multipart mp=(Multipart)c;String html="";for(int i=0;i<mp.getCount();i++){Part child=mp.getBodyPart(i);if(Part.ATTACHMENT.equalsIgnoreCase(child.getDisposition()))continue;String result=body(child,depth+1);if(child.isMimeType("text/plain")&&!result.isEmpty())return result;if(html.isEmpty())html=result;}return html;}return "(Contenido no compatible o adjunto)";}
-  void openMessage(String folder,int index){menu();content.addView(text("Abriendo mensaje…",16));work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f.getMessage(index);String from=sender(m),subject=decode(m.getSubject()),message=body(m,0);show(()->{layout("Mensaje");content.addView(button("← Volver",()->openFolder(folder)));content.addView(text(subject,22));content.addView(text("De: "+from,15));content.addView(text(message,16));content.addView(button("↩ Responder",()->compose(from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+subject,"\n\n--- Mensaje original ---\n"+message)));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+subject,"\n\n--- Mensaje reenviado ---\n"+message)));});}finally{f.close(false);}}finally{st.close();}});}
+  void openMessage(String folder,int index){menu();content.addView(text("Abriendo mensaje…",16));work(()->{Store st=connect();try{Folder f=st.getFolder(folder);f.open(Folder.READ_ONLY);try{Message m=f.getMessage(index);String from=sender(m),subject=decode(m.getSubject()),message=body(m,0),to=recipientList(m.getRecipients(Message.RecipientType.TO)),cc=recipientList(m.getRecipients(Message.RecipientType.CC)),bcc=recipientList(m.getRecipients(Message.RecipientType.BCC));show(()->{layout("Mensaje");content.addView(button("← Volver",()->openFolder(folder)));content.addView(text(subject,22));content.addView(text("De: "+from,15));content.addView(text("Para: "+to+"\nCC: "+cc+("—".equals(bcc)?"":"\nCCO: "+bcc),15));content.addView(text(message,16));content.addView(button("↩ Responder",()->compose(from.replaceAll(".*<([^>]+)>.*","$1"),"Re: "+subject,"\n\n--- Mensaje original ---\n"+message)));content.addView(button("↪ Reenviar",()->compose("","Fwd: "+subject,"\n\n--- Mensaje reenviado ---\n"+message)));});}finally{f.close(false);}}finally{st.close();}});}
   void folders(){menu();content.addView(text("Cargando carpetas…",16));work(()->{Store st=connect();try{Folder[] fs=st.getDefaultFolder().list("*");ArrayList<String> names=new ArrayList<>();for(Folder f:fs)if((f.getType()&Folder.HOLDS_MESSAGES)!=0)names.add(f.getFullName());show(()->{menu();content.addView(text("Carpetas",20));for(String name:names)content.addView(button("📁 "+name,()->openFolder(name)));});}finally{st.close();}});}
   void compose(String toValue,String subjectValue,String bodyValue){outgoingAttachments.clear();layout("Redactar");EditText to=input(content,"Destinatario",toValue,false),subject=input(content,"Asunto",subjectValue,false);EditText body=new EditText(this);body.setHint("Escribe tu mensaje");body.setText(bodyValue);body.setMinLines(8);content.addView(body);LinearLayout formatBar=new LinearLayout(this);formatBar.setOrientation(LinearLayout.HORIZONTAL);
     for(String label:new String[]{"B","I","U"}){Button fmt=new Button(this);fmt.setText(label);formatBar.addView(fmt,new LinearLayout.LayoutParams(0,-2,1));fmt.setOnClickListener(v->styleSelection(body,label.equals("B")?1:label.equals("I")?2:3));}

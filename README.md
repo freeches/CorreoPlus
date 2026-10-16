@@ -62,3 +62,6 @@ Compilación Android no verificada en este entorno.
 - Interruptor independiente en Ajustes, activado de forma predeterminada.
 - Mantiene el bloqueo previo de recursos HTTP y las confirmaciones de enlaces externos.
 - Protección heurística: no garantiza detectar todos los píxeles de seguimiento.
+
+## V2.0.7 Beta
+- Corregida la compilación de búsqueda avanzada: casilla local «Solo mensajes no leídos» declarada en su pantalla.

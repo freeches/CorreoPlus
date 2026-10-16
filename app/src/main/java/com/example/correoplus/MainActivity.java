@@ -586,6 +586,7 @@ public class MainActivity extends Activity {
     EditText bodyField=input(content,"Texto en el cuerpo descargado",advancedBody,false);
     EditText dateField=input(content,"Desde fecha (AAAA-MM-DD)",advancedAfter,false);
     CheckBox attachments=new CheckBox(this);attachments.setText("Solo mensajes con adjuntos");attachments.setChecked(advancedAttachments);content.addView(attachments);
+    CheckBox unread=new CheckBox(this);unread.setText("Solo mensajes no leídos");unread.setChecked(advancedUnread);content.addView(unread);
     LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
     content.addView(button("Buscar",()->{
       advancedSender=senderField.getText().toString().trim();advancedSubject=subjectField.getText().toString().trim();advancedBody=bodyField.getText().toString().trim();advancedUnread=unread.isChecked();advancedAfter=dateField.getText().toString().trim();advancedAttachments=attachments.isChecked();pageOffset=0;

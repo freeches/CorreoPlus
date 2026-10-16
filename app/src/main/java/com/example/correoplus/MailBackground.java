@@ -31,6 +31,8 @@ import java.util.concurrent.TimeUnit;
 import javax.mail.Flags;
 import javax.mail.Folder;
 import javax.mail.Message;
+import javax.mail.Part;
+import javax.mail.Multipart;
 import javax.mail.UIDFolder;
 import javax.mail.Session;
 import javax.mail.Store;
@@ -112,6 +114,25 @@ public final class MailBackground extends Worker {
         }else {if(existing.seen!=m.isSet(Flags.Flag.SEEN))updated++;cache.updateSeen(account,"INBOX",validity,uid,m.isSet(Flags.Flag.SEEN));}
       }
       cache.saveHeaders(account,"INBOX",validity,batch);
+      // Cache message text as messages arrive, before notifying the user.
+      // Never download external web resources, and avoid loading attachments into memory.
+      int bodiesDownloaded=0;
+      p.edit().putString("background_phase","Descargando contenido").apply();
+      for(Message m:candidates.values()){
+        if(isStopped())return Result.retry();
+        long uid=imap.getUID(m);
+        if(uid<=0)continue;
+        MailCache.Item local=cache.get(account,"INBOX",uid);
+        if(local!=null&&local.body==null){
+          try{
+            String body=extractText(m,0);
+            if(body!=null&&!body.isEmpty()){
+              cache.saveBody(account,"INBOX",uid,body);
+              bodiesDownloaded++;
+            }
+          }catch(Exception ignored){ /* One malformed message must not stop synchronization. */ }
+        }
+      }
       // Check read/unread flags for ALL cached messages, in bounded UID batches.
       // Missing UIDs are not deleted here: an incomplete response must not lose local mail.
       int removed=0,checked=0,offset=0;
@@ -134,8 +155,8 @@ public final class MailBackground extends Worker {
         if(cached.size()<100)break;
       }
       p.edit().putInt("background_progress_done",workTotal).putString("background_phase","Completado").apply();
-      history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados · "+removed+" eliminados · "+workTotal+" comprobados");
-      p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+updated+" estados actualizados · "+removed+" eliminados · "+workTotal+" comprobados").putLong("background_last_success",System.currentTimeMillis()).apply();
+      history(p,"Correcto · "+batch.size()+" nuevos · "+bodiesDownloaded+" cuerpos · "+updated+" actualizados · "+removed+" eliminados · "+workTotal+" comprobados");
+      p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+bodiesDownloaded+" cuerpos · "+updated+" estados actualizados · "+removed+" eliminados · "+workTotal+" comprobados").putLong("background_last_success",System.currentTimeMillis()).apply();
       p.edit().putLong("synced_"+account+"_INBOX",System.currentTimeMillis()).apply();
       Intent changed=new Intent("com.example.correoplus.CACHE_UPDATED");
       changed.setPackage(ctx.getPackageName());
@@ -151,6 +172,35 @@ public final class MailBackground extends Worker {
       return Result.retry();
     }
     finally{try{if(folder!=null&&folder.isOpen())folder.close(false);}catch(Exception ignored){}try{if(store!=null&&store.isConnected())store.close();}catch(Exception ignored){}RUNNING.set(false);}
+  }
+  // Prefer HTML converted to readable text; never mistake inline images for body text.
+  private static String extractText(Part part,int depth)throws Exception{
+    if(depth>12)return "";
+    String disposition=part.getDisposition();
+    if(Part.ATTACHMENT.equalsIgnoreCase(disposition))return "";
+    if(part.getFileName()!=null&&!part.isMimeType("text/plain")&&!part.isMimeType("text/html"))return "";
+    if(part.isMimeType("text/plain")){
+      Object value=part.getContent();return value instanceof String?(String)value:"";
+    }
+    if(part.isMimeType("text/html")){
+      Object value=part.getContent();
+      return value instanceof String?android.text.Html.fromHtml((String)value,android.text.Html.FROM_HTML_MODE_LEGACY).toString():"";
+    }
+    if(part.isMimeType("multipart/*")){
+      Object value=part.getContent();if(!(value instanceof Multipart))return "";
+      Multipart mp=(Multipart)value;String html="";
+      for(int i=0;i<mp.getCount();i++){
+        Part child=mp.getBodyPart(i);
+        String result=extractText(child,depth+1);
+        if(child.isMimeType("text/plain")&&!result.isEmpty())return result;
+        if(html.isEmpty()&&!result.isEmpty())html=result;
+      }
+      return html;
+    }
+    if(part.isMimeType("message/rfc822")){
+      Object value=part.getContent();if(value instanceof Part)return extractText((Part)value,depth+1);
+    }
+    return "";
   }
   private void notifyNew(Context ctx,int count,String from,String subject,long uid,String account){
     NotificationManager manager=(NotificationManager)ctx.getSystemService(Context.NOTIFICATION_SERVICE);

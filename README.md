@@ -1,3 +1,19 @@
+## CorreoPlus 2.0.5 Beta
+
+- Diagnóstico de sincronización automática con fase y progreso de encabezados.
+- Historial local de las últimas 12 comprobaciones automáticas, sin contraseñas ni contenidos.
+- Botón para solicitar una sincronización inmediata mediante WorkManager, respetando restricciones de red y batería.
+- Actualización manual del panel de diagnóstico y copia de historial.
+- El trabajo inmediato puede retrasarse según Android y conectividad; no es IMAP IDLE.
+- Compilación APK no verificada en este entorno.
+
+## CorreoPlus 2.0.4 Beta
+
+- Búsqueda avanzada por texto en cuerpo de mensajes descargados, combinable con remitente, asunto, fecha y adjuntos.
+- Filtro de mensajes no leídos en búsqueda avanzada.
+- Consultas SQL parametrizadas y términos LIKE escapados.
+- Los cuerpos aún no descargados no se pueden buscar sin conexión.
+
 # CorreoPlus 2.0 — Beta ampliada
 
 Basado en CorreoPlus V2.0 Beta. Mantiene una sola cuenta.
@@ -39,3 +55,10 @@ Compilación Android no verificada en este entorno.
 - Registro automático de destinatarios al enviar correctamente un mensaje.
 - Sugerencias de destinatarios guardados al enfocar Para o CC cuando hay texto parcial.
 - Sin permiso de lectura de contactos del teléfono ni subida de la agenda.
+
+## 2.0.3 Beta
+- Bloqueo de recursos de seguimiento por dominios conocidos y rutas habituales de píxeles de apertura.
+- El bloqueo se aplica incluso cuando se permiten imágenes remotas.
+- Interruptor independiente en Ajustes, activado de forma predeterminada.
+- Mantiene el bloqueo previo de recursos HTTP y las confirmaciones de enlaces externos.
+- Protección heurística: no garantiza detectar todos los píxeles de seguimiento.

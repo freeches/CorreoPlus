@@ -67,6 +67,22 @@ public class MainActivity extends Activity {
   byte[] pendingDownload; String pendingFilename;
   LinearLayout attachmentPreview;
   LinearLayout receivedAttachments;
+  // Privacy: refuse known open-tracking endpoints even when remote images are enabled.
+  boolean isTrackingResource(Uri uri){
+    if(uri==null)return false;
+    String host=uri.getHost();
+    if(host==null)return false;
+    host=host.toLowerCase(java.util.Locale.ROOT);
+    String[] trackers={"list-manage.com","mailchimp.com","mandrillapp.com","sendgrid.net", "sendgrid.com", "mailgun.org", "postmarkapp.com", "sparkpostmail.com", "constantcontact.com", "hubspotemail.net", "tracking.mailerlite.com", "open.tracking", "pixel.tracking"};
+    for(String domain:trackers)if(host.equals(domain)||host.endsWith("."+domain))return true;
+    String path=uri.getPath();
+    if(path==null)path="";
+    path=path.toLowerCase(java.util.Locale.ROOT);
+    return path.endsWith("/open.gif")||path.endsWith("/pixel.gif")||path.endsWith("/track/open")||path.contains("/track/open/")||path.contains("/email/open/");
+  }
+  WebResourceResponse blockedRemoteResource(){
+    return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
+  }
   String sizeKB(long size){return size<0?"tamaño no disponible":String.format(java.util.Locale.getDefault(),"%.1f KB",size/1024.0);}
   String mimeFor(String filename){String ext=MimeTypeMap.getFileExtensionFromUrl(filename);if(ext==null||ext.isEmpty()){int dot=filename.lastIndexOf('.');ext=dot>=0?filename.substring(dot+1):"";}String type=MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));return type==null?"application/octet-stream":type;}
   static class AttachmentInfo {String name; int index; long size; AttachmentInfo(String n,int i,long z){name=n;index=i;size=z;}}
@@ -204,6 +220,10 @@ public class MainActivity extends Activity {
   content.addView(densityGroup);
   CheckBox avatars=new CheckBox(this);avatars.setText("Mostrar avatares con iniciales del remitente");avatars.setTextColor(foreground());avatars.setChecked(prefs.getBoolean("inbox_avatars",true));content.addView(avatars);
   avatars.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("inbox_avatars",checked).apply());
+  content.addView(text("Vista despejada (CorreoPlus 2.0.6)",17));
+  CheckBox cleanInbox=new CheckBox(this);cleanInbox.setText("Bandeja despejada: controles en menú y más correos visibles");cleanInbox.setChecked(prefs.getBoolean("clean_inbox",true));content.addView(cleanInbox);cleanInbox.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("clean_inbox",on).apply());
+  CheckBox cleanReader=new CheckBox(this);cleanReader.setText("Lector despejado: acciones compactas y navegación en menú");cleanReader.setChecked(prefs.getBoolean("clean_reader",true));content.addView(cleanReader);cleanReader.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("clean_reader",on).apply());
+  CheckBox showDates=new CheckBox(this);showDates.setText("Mostrar fecha en cada correo de la bandeja");showDates.setChecked(prefs.getBoolean("inbox_dates",true));content.addView(showDates);showDates.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("inbox_dates",on).apply());
   content.addView(text("Deslizamiento hacia la izquierda",14));
   RadioGroup leftGroup=new RadioGroup(this);String[] swipeNames={"Eliminar","Archivar"};
   for(int i=0;i<2;i++){final int value=i;RadioButton rb=new RadioButton(this);rb.setText(swipeNames[i]);rb.setTextColor(foreground());leftGroup.addView(rb);if(prefs.getInt("swipe_left",0)==i)rb.setChecked(true);rb.setOnClickListener(v->prefs.edit().putInt("swipe_left",value).apply());}content.addView(leftGroup);
@@ -239,6 +259,8 @@ public class MainActivity extends Activity {
   inlineImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("inline_images",checked).apply());
   CheckBox remoteImages=new CheckBox(this);remoteImages.setText("Permitir imágenes externas (pueden revelar la apertura del correo)");remoteImages.setTextColor(foreground());remoteImages.setChecked(prefs.getBoolean("remote_images",false));content.addView(remoteImages);
   remoteImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("remote_images",checked).apply());
+  CheckBox blockTrackers=new CheckBox(this);blockTrackers.setText("Bloquear píxeles de seguimiento incluso con imágenes externas activadas");blockTrackers.setTextColor(foreground());blockTrackers.setChecked(prefs.getBoolean("block_tracking_pixels",true));content.addView(blockTrackers);
+  blockTrackers.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("block_tracking_pixels",checked).apply());
   content.addView(text("Firmas HTML: principal, respuestas y reenvíos",16));
   EditText replySignature=input(content,"Firma para respuestas",prefs.getString("signature_reply",""),false);
   EditText forwardSignature=input(content,"Firma para reenvíos",prefs.getString("signature_forward",""),false);
@@ -394,15 +416,37 @@ public class MainActivity extends Activity {
         content.addView(text(name+": "+prefs.getString(syncKey(name)+"_status","Sin datos"),14));
       }
     }
+    content.addView(text("Sincronización automática: "+prefs.getString("background_last_status","Sin datos"),14));
+    content.addView(text("Fase: "+prefs.getString("background_phase","Sin iniciar")+" · "+prefs.getInt("background_progress_done",0)+"/"+prefs.getInt("background_progress_total",0),14));
+    content.addView(text("Historial de las últimas 12 comprobaciones:",15));
+    content.addView(text(prefs.getString("background_history","Sin comprobaciones anteriores"),13));
+    content.addView(button("↻ Actualizar diagnóstico",()->syncDiagnostics()));
+    content.addView(button("Sincronizar ahora en segundo plano",()->{MailBackground.syncNow(this);error("Sincronización solicitada; se ejecutará cuando haya conexión compatible");}));
     content.addView(text("Mensajes guardados en "+folderName+": "+cache.count(lastAccount,folderName),14));
     content.addView(button("Copiar diagnóstico",()->{
-      String report="CorreoPlus V1.2\nCarpeta: "+folderName+"\nEstado: "+prefs.getString(syncKey(folderName)+"_status","Sin datos")+"\nEn caché: "+cache.count(lastAccount,folderName);
+      String report="CorreoPlus V2.0.5\nCarpeta: "+folderName+"\nEstado: "+prefs.getString(syncKey(folderName)+"_status","Sin datos")+"\nEn caché: "+cache.count(lastAccount,folderName)+"\nFase: "+prefs.getString("background_phase","Sin iniciar")+"\nHistorial:\n"+prefs.getString("background_history","");
       android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
       clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Diagnóstico CorreoPlus",report));
       error("Diagnóstico copiado");
     }));
   }
   void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,100);content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+    boolean clean=prefs.getBoolean("clean_inbox",true);
+    if(clean){
+      LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+      TextView heading=text("Recibidos · "+cache.count(lastAccount,folder),19);heading.setTypeface(null,Typeface.BOLD);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+      top.addView(button("☰",()->{
+        final String[] options={"Todos","No leídos","★ Favoritos","📎 Adjuntos","Búsqueda avanzada","Seleccionar varios","Sincronizar","Estado IMAP","Búsquedas guardadas"};
+        new AlertDialog.Builder(this).setTitle("Bandeja · Opciones").setItems(options,(dialog,which)->{
+          if(which<4){inboxFilter=which;renderCached(folder);}else if(which==4)advancedSearchScreen(folder);
+          else if(which==5){selectionMode=true;selectedUids.clear();renderCached(folder);}
+          else if(which==6){if(configured)openFolder(folder);else settings();}
+          else if(which==7)syncDiagnostics();else showSavedSearches(folder);
+        }).show();
+      }));
+      content.addView(top);
+      if(inboxFilter!=0)content.addView(button("Filtro: "+(inboxFilter==1?"No leídos":inboxFilter==2?"Favoritos":"Adjuntos")+"  ×",()->{inboxFilter=0;renderCached(folder);}));
+    }else{
     content.addView(button("📊 Estado IMAP",()->syncDiagnostics()));
     long last=prefs.getLong("synced_"+lastAccount+"_"+folder,0);
     content.addView(text(last==0?"Aún no sincronizado":"Última sincronización: "+new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date(last)),12));
@@ -413,25 +457,29 @@ public class MainActivity extends Activity {
     filters.addView(button("★ Favoritos",()->{inboxFilter=2;renderCached(folder);}));
     filters.addView(button("📎 Adjuntos",()->{inboxFilter=3;renderCached(folder);}));
     content.addView(text("Filtro: "+(inboxFilter==1?"No leídos":inboxFilter==2?"Favoritos":inboxFilter==3?"Con adjuntos":"Todos"),12));
+    }
     EditText search=input(content,"Buscar remitente, asunto o contenido (caché)","",false);
+    if(clean)search.setVisibility(View.GONE);
+    CheckBox unread=new CheckBox(this);unread.setText("Solo mensajes no leídos");unread.setChecked(advancedUnread);if(!clean)content.addView(unread);
     LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
     search.addTextChangedListener(new android.text.TextWatcher(){
       public void beforeTextChanged(CharSequence s,int start,int count,int after){}
       public void onTextChanged(CharSequence s,int start,int before,int count){renderSearch(results,folder,s.toString());}
       public void afterTextChanged(android.text.Editable e){}
     });
-    content.addView(button("💾 Guardar búsqueda",()->{
+    Button saveSearch=button("💾 Guardar búsqueda",()->{
       String term=search.getText().toString().trim();if(term.isEmpty()){error("Escribe una búsqueda primero");return;}
       String key="saved_searches_"+lastAccount;
       LinkedHashSet<String> terms=new LinkedHashSet<>(prefs.getStringSet(key,new HashSet<String>()));terms.add(term);
       prefs.edit().putStringSet(key,terms).apply();error("Búsqueda guardada");
-    }));
+    });if(!clean)content.addView(saveSearch);
     LinkedHashSet<String> savedTerms=new LinkedHashSet<>(prefs.getStringSet("saved_searches_"+lastAccount,new HashSet<String>()));
-    for(String savedTerm:savedTerms){content.addView(button("🔎 "+savedTerm,()->search.setText(savedTerm)));}
-    content.addView(button("🗑 Borrar búsquedas guardadas",()->{prefs.edit().remove("saved_searches_"+lastAccount).apply();renderCached(folder);}));
-    renderSearch(results,folder,"");content.addView(button("🔎 Búsqueda avanzada",()->advancedSearchScreen(folder)));content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));
-    content.addView(button("← 100 anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}));
-    content.addView(button("100 siguientes →",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
+    if(!clean)for(String savedTerm:savedTerms){content.addView(button("🔎 "+savedTerm,()->search.setText(savedTerm)));}
+    Button clearSearches=button("🗑 Borrar búsquedas guardadas",()->{prefs.edit().remove("saved_searches_"+lastAccount).apply();renderCached(folder);});if(!clean)content.addView(clearSearches);
+    renderSearch(results,folder,"");if(!clean)content.addView(button("🔎 Búsqueda avanzada",()->advancedSearchScreen(folder)));if(!clean)content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));if(!clean)content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));
+    if(clean){LinearLayout paging=new LinearLayout(this);paging.setOrientation(LinearLayout.HORIZONTAL);paging.addView(button("‹ Anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}),new LinearLayout.LayoutParams(0,-2,1));paging.addView(button("Siguientes ›",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}),new LinearLayout.LayoutParams(0,-2,1));content.addView(paging);}
+    if(!clean)content.addView(button("← 100 anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}));
+    if(!clean)content.addView(button("100 siguientes →",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
   boolean isFavorite(String folder,long uid){
     return prefs.getBoolean("fav_"+lastAccount+"_"+folder+"_"+uid,false);
   }
@@ -481,8 +529,8 @@ public class MainActivity extends Activity {
       LinearLayout item=new LinearLayout(this);
       item.setOrientation(LinearLayout.VERTICAL);
       int density=prefs.getInt("inbox_density",1);
-      int verticalPadding=density==0?5:density==2?23:14;
-      item.setPadding(18,verticalPadding,18,verticalPadding);
+      int verticalPadding=prefs.getBoolean("clean_inbox",true)?(density==2?11:5):(density==0?5:density==2?23:14);
+      item.setPadding(10,verticalPadding,10,verticalPadding);
       item.setBackgroundColor(selectedUids.contains(r.uid)?(darkMode?Color.rgb(52,78,110):Color.rgb(211,232,249)):(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252)));
       String senderLabel=senderDisplay(r.from);
       String prefix=selectionMode?(selectedUids.contains(r.uid)?"☑ ":"☐ "):"";
@@ -504,7 +552,7 @@ public class MainActivity extends Activity {
       TextView when=text(relativeMailDate(r.date),12);
       when.setPadding(12,0,0,0);subjectRow.addView(when);
       item.addView(subjectRow);
-      LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;
+      LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=prefs.getBoolean("clean_inbox",true)?1:8;
       target.addView(item,lp);
       // Consume DOWN: otherwise Android triggers the native long-click before UP,
       // incorrectly entering selection mode while a swipe is in progress.
@@ -530,21 +578,23 @@ public class MainActivity extends Activity {
       });
     }
   }
+  String advancedBody=""; boolean advancedUnread=false;
   void advancedSearchScreen(String folder){
     menu();content.addView(text("Búsqueda avanzada · "+folder,20));
     EditText senderField=input(content,"Remitente contiene",advancedSender,false);
     EditText subjectField=input(content,"Asunto contiene",advancedSubject,false);
+    EditText bodyField=input(content,"Texto en el cuerpo descargado",advancedBody,false);
     EditText dateField=input(content,"Desde fecha (AAAA-MM-DD)",advancedAfter,false);
     CheckBox attachments=new CheckBox(this);attachments.setText("Solo mensajes con adjuntos");attachments.setChecked(advancedAttachments);content.addView(attachments);
     LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);content.addView(results);
     content.addView(button("Buscar",()->{
-      advancedSender=senderField.getText().toString().trim();advancedSubject=subjectField.getText().toString().trim();advancedAfter=dateField.getText().toString().trim();advancedAttachments=attachments.isChecked();pageOffset=0;
+      advancedSender=senderField.getText().toString().trim();advancedSubject=subjectField.getText().toString().trim();advancedBody=bodyField.getText().toString().trim();advancedUnread=unread.isChecked();advancedAfter=dateField.getText().toString().trim();advancedAttachments=attachments.isChecked();pageOffset=0;
       showAdvancedResults(folder,results);
     }));
     content.addView(button("Volver a bandeja",()->renderCached(folder)));
   }
   void showAdvancedResults(String folder,LinearLayout results){
-    results.removeAllViews();ArrayList<MailCache.Item> found=cache.advancedSearch(lastAccount,folder,advancedSender,advancedSubject,advancedAfter,advancedAttachments,pageOffset);
+    results.removeAllViews();ArrayList<MailCache.Item> found=cache.advancedSearch(lastAccount,folder,advancedSender,advancedSubject,advancedBody,advancedAfter,advancedAttachments,advancedUnread,pageOffset);
     results.addView(text("Resultados: "+found.size()+" en esta página",15));
     for(MailCache.Item item:found)results.addView(button(senderDisplay(item.from)+" · "+item.subject+" · "+relativeMailDate(item.date),()->openCachedMessage(folder,item.uid)));
     if(pageOffset>0)results.addView(button("← Anteriores",()->{pageOffset=Math.max(0,pageOffset-100);showAdvancedResults(folder,results);}));
@@ -679,8 +729,9 @@ public class MainActivity extends Activity {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
               String scheme=req.getUrl().getScheme();
               if("data".equalsIgnoreCase(scheme))return null;
+              if(prefs.getBoolean("block_tracking_pixels",true)&&isTrackingResource(req.getUrl()))return blockedRemoteResource();
               if(prefs.getBoolean("remote_images",false)&&"https".equalsIgnoreCase(scheme))return null;
-              return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0]));
+              return blockedRemoteResource();
             }
           });
           // A fixed-height WebView scrolls its own HTML document. Do not resize it
@@ -813,8 +864,9 @@ public class MainActivity extends Activity {
     // A true vertical layout: scroll uses remaining space; actions are a fixed sibling.
     // No overlay and no pixel-sized controls (which were clipped on high-density screens).
     ScrollView messageScroll=(ScrollView)root.getChildAt(1);
-    int actionHeight=(int)(76*getResources().getDisplayMetrics().density+0.5f);
-    content.addView(button("← Volver",()->renderCached(folder)));
+    boolean cleanReader=prefs.getBoolean("clean_reader",true);
+    int actionHeight=(int)((cleanReader?51:76)*getResources().getDisplayMetrics().density+0.5f);
+    if(cleanReader){LinearLayout backRow=new LinearLayout(this);backRow.setOrientation(LinearLayout.HORIZONTAL);backRow.addView(button("‹ Volver",()->renderCached(folder)),new LinearLayout.LayoutParams(0,-2,1));backRow.addView(button("⋮",()->showReaderNavigation(folder,uid)),new LinearLayout.LayoutParams(0,-2,0.5f));content.addView(backRow);}else content.addView(button("← Volver",()->renderCached(folder)));
     // Navigation uses the already cached folder ordering, without extra IMAP requests.
     ArrayList<MailCache.Item> nearby=cache.list(lastAccount,folder);
     int position=-1;
@@ -830,13 +882,13 @@ public class MainActivity extends Activity {
       Button olderButton=button("Más antiguo →",()->openCachedMessage(folder,older));
       olderButton.setEnabled(older!=-1);
       navigation.addView(olderButton,new LinearLayout.LayoutParams(0,-2,1));
-      content.addView(navigation);
+      if(!cleanReader)content.addView(navigation);
     }
     TextView subject=text(cached.subject,23);subject.setTypeface(null,Typeface.BOLD);content.addView(subject);
     LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(android.view.Gravity.CENTER_VERTICAL);
     TextView avatar=text(shortSender(cached.from).substring(0,1).toUpperCase(java.util.Locale.getDefault()),23);
     avatar.setGravity(android.view.Gravity.CENTER);avatar.setTextColor(Color.WHITE);avatar.setBackgroundColor(blue);
-    LinearLayout.LayoutParams avatarLp=new LinearLayout.LayoutParams(58,58);avatarLp.setMargins(0,0,12,0);header.addView(avatar,avatarLp);
+    LinearLayout.LayoutParams avatarLp=new LinearLayout.LayoutParams(58,58);avatarLp.setMargins(0,0,12,0);if(!cleanReader)header.addView(avatar,avatarLp);
     LinearLayout senderColumn=new LinearLayout(this);senderColumn.setOrientation(LinearLayout.VERTICAL);
     TextView sender=text(shortSender(cached.from),18);sender.setTypeface(null,Typeface.BOLD);senderColumn.addView(sender);
     TextView summary=text("Para y CC: cargando…",13);summary.setSingleLine(true);summary.setEllipsize(android.text.TextUtils.TruncateAt.END);senderColumn.addView(summary);
@@ -874,13 +926,30 @@ public class MainActivity extends Activity {
       addMessageAction(actions,"↩","Responder",()->prepareResponse(folder,uid,"reply"));
       addMessageAction(actions,"↩↩","A todos",()->prepareResponse(folder,uid,"all"));
       addMessageAction(actions,"➜","Reenviar",()->prepareResponse(folder,uid,"forward"));
-      addMessageAction(actions,"▣","Archivar",()->confirmMove(folder,uid,false));
-      addMessageAction(actions,"✕","Eliminar",()->confirmMove(folder,uid,true));
+      if(!cleanReader){addMessageAction(actions,"▣","Archivar",()->confirmMove(folder,uid,false));addMessageAction(actions,"✕","Eliminar",()->confirmMove(folder,uid,true));}
     }else{
       addMessageAction(actions,"☆","Favorito",()->toggleFavorite(folder,uid));
     }
     addMessageMenu(actions,folder,uid,cached.seen);
     if(configured && prefs.getBoolean("default_html",false))showHtmlMessage(folder,uid);
+  }
+  void showSavedSearches(String folder){
+    LinkedHashSet<String> terms=new LinkedHashSet<>(prefs.getStringSet("saved_searches_"+lastAccount,new HashSet<String>()));
+    String[] entries=new String[terms.size()+2];entries[0]="Nueva búsqueda";int i=1;for(String term:terms)entries[i++]=term;entries[i]="Borrar búsquedas guardadas";
+    new AlertDialog.Builder(this).setTitle("Búsquedas").setItems(entries,(d,which)->{
+      if(which==0){renderCached(folder);EditText field=null;for(int j=0;j<content.getChildCount();j++)if(content.getChildAt(j) instanceof EditText){field=(EditText)content.getChildAt(j);break;}if(field!=null){field.setVisibility(View.VISIBLE);field.requestFocus();}}
+      else if(which==entries.length-1){prefs.edit().remove("saved_searches_"+lastAccount).apply();}
+      else{String term=entries[which];renderCached(folder);for(int j=0;j<content.getChildCount();j++)if(content.getChildAt(j) instanceof EditText){EditText field=(EditText)content.getChildAt(j);field.setVisibility(View.VISIBLE);field.setText(term);break;}}
+    }).show();
+  }
+  void showReaderNavigation(String folder,long uid){
+    ArrayList<MailCache.Item> list=cache.list(lastAccount,folder);int pos=-1;for(int i=0;i<list.size();i++)if(list.get(i).uid==uid){pos=i;break;}
+    final long newer=pos>0?list.get(pos-1).uid:-1,older=pos>=0&&pos+1<list.size()?list.get(pos+1).uid:-1;
+    String[] choices={"Mensaje anterior (más reciente)","Mensaje siguiente (más antiguo)","Archivar","Eliminar"};
+    new AlertDialog.Builder(this).setTitle("Opciones del mensaje").setItems(choices,(d,which)->{
+      if(which==0&&newer!=-1)openCachedMessage(folder,newer);else if(which==1&&older!=-1)openCachedMessage(folder,older);
+      else if(which==2)confirmMove(folder,uid,false);else if(which==3)confirmMove(folder,uid,true);
+    }).show();
   }
   void addMessageMenu(LinearLayout bar,String folder,long uid,boolean seen){
     addMessageAction(bar,"⋮","Más",()->{
@@ -922,7 +991,7 @@ public class MainActivity extends Activity {
     caption.setSingleLine(true);
     caption.setIncludeFontPadding(false);
     cell.addView(glyph,new LinearLayout.LayoutParams(-1,-2));
-    cell.addView(caption,new LinearLayout.LayoutParams(-1,-2));
+    if(!prefs.getBoolean("clean_reader",true))cell.addView(caption,new LinearLayout.LayoutParams(-1,-2));
     cell.setContentDescription(label);
     cell.setOnClickListener(v->action.run());
     bar.addView(cell,new LinearLayout.LayoutParams(0,-1,1));

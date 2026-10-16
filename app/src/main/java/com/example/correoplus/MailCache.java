@@ -50,13 +50,15 @@ public final class MailCache extends SQLiteOpenHelper {
             while(c.moveToNext())out.add(new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6)));
         }return out;
     }
-    public synchronized ArrayList<Item> advancedSearch(String account,String folder,String sender,String subject,String after,boolean attachmentsOnly,int offset){
+    public synchronized ArrayList<Item> advancedSearch(String account,String folder,String sender,String subject,String bodyTerm,String after,boolean attachmentsOnly,boolean unreadOnly,int offset){
         ArrayList<Item> out=new ArrayList<>();long val=validity(account,folder);
         StringBuilder sql=new StringBuilder("SELECT uid,sender,subject,date_text,seen,body,has_attachments FROM messages WHERE account=? AND folder=? AND validity=?");
         ArrayList<String> args=new ArrayList<>();args.add(account);args.add(folder);args.add(String.valueOf(val));
         if(!sender.isEmpty()){sql.append(" AND sender LIKE ? ESCAPE '\\'");args.add("%"+escapeLike(sender)+"%");}
         if(!subject.isEmpty()){sql.append(" AND subject LIKE ? ESCAPE '\\'");args.add("%"+escapeLike(subject)+"%");}
+        if(!bodyTerm.isEmpty()){sql.append(" AND body LIKE ? ESCAPE '\\'");args.add("%"+escapeLike(bodyTerm)+"%");}
         if(attachmentsOnly)sql.append(" AND has_attachments=1");
+        if(unreadOnly)sql.append(" AND seen=0");
         sql.append(" ORDER BY uid DESC LIMIT 100 OFFSET ?");args.add(String.valueOf(Math.max(0,offset)));
         try(Cursor c=getReadableDatabase().rawQuery(sql.toString(),args.toArray(new String[0]))){while(c.moveToNext()){
             Item item=new Item(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getInt(4)!=0,c.getString(5),c.getInt(6));

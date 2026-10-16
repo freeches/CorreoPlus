@@ -16,6 +16,8 @@ import androidx.work.NetworkType;
 import android.os.BatteryManager;
 import android.content.IntentFilter;
 import androidx.work.PeriodicWorkRequest;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.ExistingWorkPolicy;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 import androidx.work.WorkManager;
@@ -45,9 +47,25 @@ public final class MailBackground extends Worker {
     PeriodicWorkRequest req=new PeriodicWorkRequest.Builder(MailBackground.class,15,TimeUnit.MINUTES).setConstraints(c).build();
     manager.enqueueUniquePeriodicWork("correo_background",ExistingPeriodicWorkPolicy.UPDATE,req);
   }
+  public static void syncNow(Context context){
+    SharedPreferences p=context.getSharedPreferences("correoplus_settings",Context.MODE_PRIVATE);
+    Constraints c=new Constraints.Builder()
+      .setRequiredNetworkType(p.getBoolean("sync_wifi_only",false)?NetworkType.UNMETERED:NetworkType.CONNECTED)
+      .setRequiresBatteryNotLow(p.getBoolean("sync_battery_guard",true)).build();
+    WorkManager.getInstance(context).enqueueUniqueWork("correo_manual_background",ExistingWorkPolicy.KEEP,
+      new OneTimeWorkRequest.Builder(MailBackground.class).addTag("manual").setConstraints(c).build());
+  }
+  private static void history(SharedPreferences p,String entry){
+    String old=p.getString("background_history","");
+    String stamp=new java.text.SimpleDateFormat("dd/MM HH:mm",Locale.getDefault()).format(new Date());
+    String value=stamp+" · "+entry+"\n"+old;
+    String[] lines=value.split("\n");StringBuilder limited=new StringBuilder();
+    for(int i=0;i<Math.min(12,lines.length);i++)limited.append(lines[i]).append('\n');
+    p.edit().putString("background_history",limited.toString()).apply();
+  }
   @NonNull @Override public Result doWork(){
     Context ctx=getApplicationContext();SharedPreferences p=ctx.getSharedPreferences("correoplus_settings",Context.MODE_PRIVATE);
-    if(!p.getBoolean("background_sync",false))return Result.success();
+    if(!p.getBoolean("background_sync",false)&&!getTags().contains("manual"))return Result.success();
     String account=p.getString("account",""),host=p.getString("imap_host",""),user=p.getString("username","");
     if(account.isEmpty()||host.isEmpty()||user.isEmpty())return Result.success();
     // Avoid two background connections running concurrently across worker instances.
@@ -68,8 +86,11 @@ public final class MailBackground extends Worker {
       IMAPFolder imap=(IMAPFolder)folder;long validity=imap.getUIDValidity();
       MailCache cache=new MailCache(ctx);long previous=cache.maxUid(account,"INBOX",validity);
       int total=folder.getMessageCount();ArrayList<MailCache.Item> batch=new ArrayList<>();
+      p.edit().putInt("background_progress_total",Math.min(total,100)).putInt("background_progress_done",0).putString("background_phase","Leyendo encabezados").apply();
       long newest=previous;String latestFrom="",latestSubject="";int fresh=0,updated=0;
       for(int i=total;i>Math.max(0,total-100);i--){
+        if(isStopped())return Result.retry();
+        if((total-i)%10==0)p.edit().putInt("background_progress_done",total-i).apply();
         Message m=folder.getMessage(i);long uid=imap.getUID(m);if(uid<=0)continue;
         MailCache.Item existing=cache.get(account,"INBOX",uid);
         if(existing==null){Date date=m.getSentDate();String from=m.getFrom()==null||m.getFrom().length==0?"Remitente":MimeUtility.decodeText(m.getFrom()[0].toString());
@@ -80,13 +101,16 @@ public final class MailBackground extends Worker {
         }else {if(existing.seen!=m.isSet(Flags.Flag.SEEN))updated++;cache.updateSeen(account,"INBOX",validity,uid,m.isSet(Flags.Flag.SEEN));}
       }
       cache.saveHeaders(account,"INBOX",validity,batch);
+      p.edit().putInt("background_progress_done",Math.min(total,100)).putString("background_phase","Completado").apply();
+      history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados");
       p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+updated+" estados actualizados").putLong("background_last_success",System.currentTimeMillis()).apply();
       p.edit().putLong("synced_"+account+"_INBOX",System.currentTimeMillis()).apply();
       if(fresh>0)notifyNew(ctx,fresh,latestFrom,latestSubject);
       return Result.success();
     }catch(Exception ex){
       // Never persist exception messages: servers may include private data.
-      p.edit().putString("background_last_status","Fallo: "+ex.getClass().getSimpleName()).putLong("background_last_failure",System.currentTimeMillis()).apply();
+      history(p,"Fallo · "+ex.getClass().getSimpleName());
+      p.edit().putString("background_phase","Esperando reintento").putString("background_last_status","Fallo: "+ex.getClass().getSimpleName()).putLong("background_last_failure",System.currentTimeMillis()).apply();
       return Result.retry();
     }
     finally{try{if(folder!=null&&folder.isOpen())folder.close(false);}catch(Exception ignored){}try{if(store!=null&&store.isConnected())store.close();}catch(Exception ignored){}RUNNING.set(false);}

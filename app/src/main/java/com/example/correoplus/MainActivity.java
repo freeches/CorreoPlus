@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
   byte[] pendingDownload; String pendingFilename;
   LinearLayout attachmentPreview;
   LinearLayout receivedAttachments;
+  LinearLayout receivedAttachmentSection;
   // Privacy: refuse known open-tracking endpoints even when remote images are enabled.
   boolean isTrackingResource(Uri uri){
     if(uri==null)return false;
@@ -85,7 +86,8 @@ public class MainActivity extends Activity {
   }
   String sizeKB(long size){return size<0?"tamaño no disponible":String.format(java.util.Locale.getDefault(),"%.1f KB",size/1024.0);}
   String mimeFor(String filename){String ext=MimeTypeMap.getFileExtensionFromUrl(filename);if(ext==null||ext.isEmpty()){int dot=filename.lastIndexOf('.');ext=dot>=0?filename.substring(dot+1):"";}String type=MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));return type==null?"application/octet-stream":type;}
-  static class AttachmentInfo {String name; int index; long size; AttachmentInfo(String n,int i,long z){name=n;index=i;size=z;}}
+  static class AttachmentInfo {String name; int index; long size; boolean inline; AttachmentInfo(String n,int i,long z,boolean in){name=n;index=i;size=z;inline=in;}}
+  boolean isInlinePart(Part part)throws Exception{String disposition=part.getDisposition();String[] cid=part.getHeader("Content-ID");return Part.INLINE.equalsIgnoreCase(disposition)||(cid!=null&&cid.length>0&&!Part.ATTACHMENT.equalsIgnoreCase(disposition));}
   String safeName(String name){if(name==null||name.trim().isEmpty())return "adjunto";return name.replace('\\','_').replace('/','_').replace('\n','_').replace('\r','_');}
   void collectAttachments(Part part,ArrayList<AttachmentInfo> result,int depth)throws Exception{
     if(depth>12)return;
@@ -96,7 +98,7 @@ public class MainActivity extends Activity {
     }
     String disposition=part.getDisposition(),filename=part.getFileName();
     if(filename!=null || Part.ATTACHMENT.equalsIgnoreCase(disposition)){
-      result.add(new AttachmentInfo(safeName(decode(filename)),result.size(),part.getSize()));
+      result.add(new AttachmentInfo(safeName(decode(filename)),result.size(),part.getSize(),isInlinePart(part)));
     }
   }
   Part attachmentByIndex(Part part,int[] count,int wanted,int depth)throws Exception{
@@ -114,16 +116,31 @@ public class MainActivity extends Activity {
   void loadAttachments(String folder,long uid){
     if(receivedAttachments==null)return;
     LinearLayout target=receivedAttachments;
-    target.removeAllViews();target.addView(text("Cargando adjuntos…",13));
+    target.removeAllViews();if(receivedAttachmentSection!=null)receivedAttachmentSection.setVisibility(View.GONE);
     work(()->{Store st=connect();try{Folder f=st.getFolder(folder);try{f.open(Folder.READ_ONLY);
       Message m=f instanceof IMAPFolder?((IMAPFolder)f).getMessageByUID(uid):null;
       if(m==null)throw new Exception("El mensaje ya no está disponible en el servidor");
       ArrayList<AttachmentInfo> attachments=new ArrayList<>();collectAttachments(m,attachments,0);cache.updateAttachments(lastAccount,folder,uid,!attachments.isEmpty());
-      show(()->{if(receivedAttachments!=target)return;target.removeAllViews();if(!attachments.isEmpty()){
-        target.addView(text("📎 Adjuntos ("+attachments.size()+")",18));
-        for(AttachmentInfo a:attachments){target.addView(button("📄 "+a.name+" · "+sizeKB(a.size)+"   Abrir",()->openAttachment(folder,uid,a.index,a.name)));
-          target.addView(button("↓ Guardar "+a.name,()->downloadAttachment(folder,uid,a.index,a.name)));}
-      }});
+      show(()->{if(receivedAttachments!=target)return;target.removeAllViews();
+        ArrayList<AttachmentInfo> regular=new ArrayList<>(),inline=new ArrayList<>();
+        for(AttachmentInfo a:attachments){if(a.inline)inline.add(a);else regular.add(a);}
+        if(receivedAttachmentSection!=null)receivedAttachmentSection.setVisibility(attachments.isEmpty()?View.GONE:View.VISIBLE);
+        if(!regular.isEmpty()){
+          target.addView(text("Archivos adjuntos ("+regular.size()+")",16));
+          for(AttachmentInfo a:regular){target.addView(button("📄 "+a.name+" · "+sizeKB(a.size)+" · Abrir",()->openAttachment(folder,uid,a.index,a.name)));}
+        }
+        if(!inline.isEmpty()){
+          target.addView(text("Imágenes y recursos incrustados ("+inline.size()+")",15));
+          for(AttachmentInfo a:inline){target.addView(button("🖼 "+a.name+" · "+sizeKB(a.size)+" · Abrir",()->openAttachment(folder,uid,a.index,a.name)));}
+        }
+        target.addView(button("💾 Guardar archivos…",()->{
+          String[] names=new String[attachments.size()];
+          for(int i=0;i<attachments.size();i++){AttachmentInfo a=attachments.get(i);names[i]=(a.inline?"🖼 ":"📎 ")+a.name;}
+          new AlertDialog.Builder(this).setTitle("Guardar archivo del mensaje").setItems(names,(d,which)->{
+            AttachmentInfo selected=attachments.get(which);downloadAttachment(folder,uid,selected.index,selected.name);
+          }).setNegativeButton("Cancelar",null).show();
+        }));
+      });
     }finally{if(f.isOpen())f.close(false);}}finally{st.close();}});
   }
   byte[] getAttachmentBytes(String folder,long uid,int index)throws Exception{
@@ -261,12 +278,12 @@ public class MainActivity extends Activity {
   remoteImages.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("remote_images",checked).apply());
   CheckBox blockTrackers=new CheckBox(this);blockTrackers.setText("Bloquear píxeles de seguimiento incluso con imágenes externas activadas");blockTrackers.setTextColor(foreground());blockTrackers.setChecked(prefs.getBoolean("block_tracking_pixels",true));content.addView(blockTrackers);
   blockTrackers.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("block_tracking_pixels",checked).apply());
-  content.addView(text("Firmas HTML: principal, respuestas y reenvíos",16));
-  EditText replySignature=input(content,"Firma para respuestas",prefs.getString("signature_reply",""),false);
-  EditText forwardSignature=input(content,"Firma para reenvíos",prefs.getString("signature_forward",""),false);
+  content.addView(text("Firmas HTML: principal, respuestas y reenvíos. Se admite código HTML (enlaces, imágenes remotas y estilos).",16));
+  EditText replySignature=input(content,"HTML firma para respuestas",prefs.getString("signature_reply",""),false);
+  EditText forwardSignature=input(content,"HTML firma para reenvíos",prefs.getString("signature_forward",""),false);
   content.addView(button("Guardar firmas adicionales",()->{prefs.edit().putString("signature_reply",replySignature.getText().toString()).putString("signature_forward",forwardSignature.getText().toString()).apply();error("Firmas guardadas");}));
   content.addView(text("Firma automática (se añade al enviar)",14));
-  EditText signature=input(content,"Tu firma",prefs.getString("signature",""),false);
+  EditText signature=input(content,"HTML firma principal",prefs.getString("signature",""),false);
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
   CheckBox remember=new CheckBox(this);remember.setText("Recordar contraseña cifrada en este dispositivo");content.addView(remember);
   content.addView(button("Borrar contraseña guardada",()->{CredentialVault.clear(this);pw=null;configured=false;error("Credenciales guardadas eliminadas");}));smtpHost=input(content,"Servidor SMTP",prefs.getString("smtp_host",""),false);smtpPort=input(content,"Puerto SMTP 465 o 587",prefs.getString("smtp_port","587"),false);content.addView(button("Conectar y abrir bandeja",()->{try{h=host.getText().toString().trim();u=user.getText().toString().trim();pw=pass.getText().toString();sh=smtpHost.getText().toString().trim();imapPort=Integer.parseInt(port.getText().toString().trim());sPort=Integer.parseInt(smtpPort.getText().toString().trim());if(h.isEmpty()||u.isEmpty()||pw.isEmpty()||!(imapPort==993||imapPort==143)||!(sPort==465||sPort==587))throw new Exception("Revisa servidor, usuario, contraseña y puertos admitidos");rememberPassword=remember.isChecked();configured=true;lastAccount=u.toLowerCase(Locale.ROOT)+"@"+h.toLowerCase(Locale.ROOT);if(rememberPassword){CredentialVault.save(this,lastAccount,pw);}else{CredentialVault.clear(this);}prefs.edit().putString("account",lastAccount).putString("imap_host",h).putString("imap_port",String.valueOf(imapPort)).putString("username",u).putString("smtp_host",sh).putString("smtp_port",String.valueOf(sPort)).apply();openFolder("INBOX");}catch(Exception e){error(e.getMessage());}}));}
@@ -925,7 +942,7 @@ public class MainActivity extends Activity {
     attachmentSection.addView(attachmentToggle);
     receivedAttachments=new LinearLayout(this);receivedAttachments.setOrientation(LinearLayout.VERTICAL);
     receivedAttachments.setVisibility(View.GONE);
-    attachmentSection.addView(receivedAttachments);content.addView(attachmentSection);
+    attachmentSection.addView(receivedAttachments);content.addView(attachmentSection);receivedAttachmentSection=attachmentSection;attachmentSection.setVisibility(View.GONE);
     attachmentToggle.setOnClickListener(v->{boolean expand=receivedAttachments.getVisibility()!=View.VISIBLE;
       receivedAttachments.setVisibility(expand?View.VISIBLE:View.GONE);
       attachmentToggle.setText(expand?"📎 Adjuntos  ⌃":"📎 Adjuntos  ⌄");});
@@ -1237,7 +1254,8 @@ public class MainActivity extends Activity {
     attachmentPreview=new LinearLayout(this);attachmentPreview.setOrientation(LinearLayout.VERTICAL);content.addView(attachmentPreview);content.addView(button("📎 Añadir archivo",()->{Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType("*/*");intent.addCategory(Intent.CATEGORY_OPENABLE);intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(intent,PICK_ATTACHMENT);}));content.addView(button("Enviar",()->{String dest=to.getText().toString().trim(),sub=subject.getText().toString(),msg=body.getText().toString();if(dest.isEmpty()||sh.isEmpty()){error("Completa destinatario y servidor SMTP");return;}work(()->{Properties props=new Properties();props.put("mail.smtp.auth","true");props.put("mail.smtp.host",sh);props.put("mail.smtp.port",String.valueOf(sPort));props.put("mail.smtp.connectiontimeout","15000");props.put("mail.smtp.timeout","15000");if(sPort==465)props.put("mail.smtp.ssl.enable","true");else{props.put("mail.smtp.starttls.enable","true");props.put("mail.smtp.starttls.required","true");}Session session=Session.getInstance(props,new Authenticator(){protected PasswordAuthentication getPasswordAuthentication(){return new PasswordAuthentication(u,pw);}});MimeMessage m=new MimeMessage(session);m.setFrom(new InternetAddress(u));m.setRecipients(Message.RecipientType.TO,InternetAddress.parse(dest,true));String ccText=cc.getText().toString().trim();if(!ccText.isEmpty())m.setRecipients(Message.RecipientType.CC,InternetAddress.parse(ccText,true));if(replyId!=null&&!replyId.trim().isEmpty()){m.setHeader("In-Reply-To",replyId);m.setHeader("References",(references==null||references.trim().isEmpty()?"":references.trim()+" ")+replyId);}m.setSubject(sub,"UTF-8");String signature=prefs.getString("signature","");
       if(replyId!=null&&!replyId.isEmpty())signature=prefs.getString("signature_reply",signature);
       else if(quotedHtml!=null&&!quotedHtml.isEmpty())signature=prefs.getString("signature_forward",signature);
-      String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+signature);
+      String plainSignature=android.text.Html.fromHtml(signature,android.text.Html.FROM_HTML_MODE_LEGACY).toString();
+      String finalBody=msg+(signature.trim().isEmpty()?"":"\n\n-- \n"+plainSignature);
       String formatted=android.text.Html.toHtml(body.getText(),android.text.Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL);
       // Preserve the original MIME HTML verbatim instead of round-tripping through Html.fromHtml/toHtml.
       String finalHtml;
@@ -1245,8 +1263,8 @@ public class MainActivity extends Activity {
         String editorText=body.getText().toString();int headerPos=editorText.indexOf(quoteHeader);
         String newText=headerPos>=0?editorText.substring(0,headerPos):editorText;
         String newHtml=htmlEscape(newText);
-        finalHtml="<html><body>"+newHtml+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"<hr><p>"+htmlEscape(quoteHeader)+"</p>"+htmlFragment(quotedHtml)+"</body></html>";
-      }else finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<p>--<br>"+htmlEscape(signature)+"</p>")+"</body></html>";
+        finalHtml="<html><body>"+newHtml+(signature.trim().isEmpty()?"":"<div class=\"correoplus-signature\">"+signature+"</div>")+"<hr><p>"+htmlEscape(quoteHeader)+"</p>"+htmlFragment(quotedHtml)+"</body></html>";
+      }else finalHtml="<html><body>"+formatted+(signature.trim().isEmpty()?"":"<div class=\"correoplus-signature\">"+signature+"</div>")+"</body></html>";
       ArrayList<Uri> files=new ArrayList<>(outgoingAttachments);
       MimeMultipart alternative=new MimeMultipart("alternative");
       MimeBodyPart plain=new MimeBodyPart();plain.setText(finalBody,"UTF-8");alternative.addBodyPart(plain);

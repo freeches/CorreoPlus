@@ -72,3 +72,9 @@ Compilación Android no verificada en este entorno.
 - Eliminados los cuatro botones grandes de la parte superior de la bandeja.
 - Eliminada la línea redundante de mensajes guardados en la bandeja despejada.
 - Restauradas las etiquetas bajo los iconos de acciones del lector, manteniendo la lectura despejada.
+
+## 2.0.9 Beta
+- Firmas HTML para mensajes nuevos, respuestas y reenvíos (con alternativa de texto plano).
+- Los mensajes sin archivos no muestran la sección de adjuntos.
+- Diferenciación entre archivos adjuntos e imágenes/recursos incrustados mediante Content-ID y Content-Disposition.
+- Guardado centralizado de archivos desde un único botón «Guardar archivos…» y selector de archivo, usando el selector general de documentos de Android.

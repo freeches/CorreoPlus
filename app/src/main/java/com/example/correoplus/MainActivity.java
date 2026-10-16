@@ -56,6 +56,7 @@ import javax.mail.internet.MimeUtility;
 public class MainActivity extends Activity {
   final Handler ui=new Handler(Looper.getMainLooper());
   MailCache cache; String lastAccount=""; SharedPreferences prefs;
+  ImapIdleWatcher idleWatcher;
   LinearLayout root, content, toolbar; EditText host, port, user, pass, smtpHost, smtpPort;
   String h,u,pw,sh; int imapPort,sPort; boolean configured=false; boolean rememberPassword=false; String folderName="INBOX"; int inboxFilter=0; int pageOffset=0; String advancedSender="", advancedSubject="", advancedAfter=""; boolean advancedAttachments=false;
   final int navy=Color.rgb(17,43,74); int blue=Color.rgb(0,105,185);
@@ -226,6 +227,8 @@ public class MainActivity extends Activity {
     openNotificationIntent(getIntent());
     if(configured) openFolder("INBOX");
   }}
+  @Override protected void onResume(){super.onResume();if(prefs!=null&&prefs.getBoolean("background_sync",false)){idleWatcher=new ImapIdleWatcher(this);idleWatcher.start();}}
+  @Override protected void onPause(){if(idleWatcher!=null){idleWatcher.stop();idleWatcher=null;}super.onPause();}
   @Override protected void onNewIntent(Intent intent){
     super.onNewIntent(intent);setIntent(intent);openNotificationIntent(intent);
   }
@@ -1316,6 +1319,29 @@ public class MainActivity extends Activity {
           multi.addBodyPart(attachment);
         }m.setContent(multi);
       }
-      Transport.send(m);rememberRecipients(dest);rememberRecipients(ccText);prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply();show(()->{new AlertDialog.Builder(this).setMessage("Mensaje enviado").setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
+      Transport.send(m);
+      // SMTP succeeded. Preserve the exact MIME message (HTML, embedded images, attachments) in IMAP Sent.
+      boolean savedSent=false;String sentFailure="";
+      try{m.setSentDate(new java.util.Date());m.saveChanges();savedSent=saveSentCopy(m);}catch(Exception sentEx){sentFailure=sentEx.getClass().getSimpleName();}
+      final boolean copySaved=savedSent;final String copyError=sentFailure;
+      rememberRecipients(dest);rememberRecipients(ccText);prefs.edit().remove(draftKey+"_to").remove(draftKey+"_cc").remove(draftKey+"_subject").remove(draftKey+"_body").apply();show(()->{new AlertDialog.Builder(this).setMessage(copySaved?"Mensaje enviado y copia guardada en Enviados":"Mensaje enviado, pero no se pudo guardar la copia en Enviados"+(copyError.isEmpty()?"":" ("+copyError+")")).setPositiveButton("Aceptar",(d,w)->openFolder(folderName)).show();});});}));content.addView(button("Cancelar",()->openFolder(folderName)));}
+  boolean saveSentCopy(MimeMessage sent)throws Exception{
+    Store st=null;Folder f=null;
+    try{
+      st=connect();
+      String[] preferred={"\\Sent", "Sent", "Sent Items", "Sent Messages", "Enviados", "INBOX.Sent", "INBOX.Enviados", "[Gmail]/Sent Mail", "[Gmail]/Enviados"};
+      // Discover the server's \Sent special-use folder instead of assuming a localized name.
+      String selected=null;
+      try{Folder[] folders=st.getDefaultFolder().list("*");
+        for(Folder candidate:folders){if(candidate instanceof com.sun.mail.imap.IMAPFolder){
+          String[] attributes=((com.sun.mail.imap.IMAPFolder)candidate).getAttributes();
+          if(attributes!=null)for(String attribute:attributes)if("\\Sent".equalsIgnoreCase(attribute)){selected=candidate.getFullName();break;}
+        }if(selected!=null)break;}
+      }catch(Exception ignored){}
+      if(selected==null)for(String name:preferred){if(name.startsWith("\\"))continue;Folder candidate=st.getFolder(name);if(candidate.exists()){selected=name;break;}}
+      if(selected==null){selected="Sent";Folder candidate=st.getFolder(selected);if(!candidate.exists()&&!candidate.create(Folder.HOLDS_MESSAGES))throw new Exception("No existe carpeta Enviados");}
+      f=st.getFolder(selected);f.open(Folder.READ_WRITE);f.appendMessages(new Message[]{sent});return true;
+    }finally{if(f!=null&&f.isOpen())f.close(false);if(st!=null&&st.isConnected())st.close();}
+  }
   @Override public void onBackPressed(){renderCached(folderName);}
 }

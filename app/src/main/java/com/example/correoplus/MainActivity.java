@@ -322,12 +322,18 @@ public class MainActivity extends Activity {
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
   // A single compact navigation row replaces the four oversized menu buttons.
+  String folderDisplayName(String folder){
+    if(folder==null||folder.equalsIgnoreCase("INBOX"))return "Recibidos";
+    String last=folder.replace('\\','/');
+    int slash=last.lastIndexOf('/');
+    return slash>=0?last.substring(slash+1):last;
+  }
   void menu(){
     layout("Correo");
     LinearLayout nav=new LinearLayout(this);
     nav.setOrientation(LinearLayout.HORIZONTAL);
     nav.setGravity(android.view.Gravity.CENTER_VERTICAL);
-    TextView title=text("Recibidos",18);
+    TextView title=text(folderDisplayName(folderName),18);
     title.setTypeface(null,Typeface.BOLD);
     nav.addView(title,new LinearLayout.LayoutParams(0,-2,1));
     Button foldersButton=button("☰",()->{
@@ -493,18 +499,22 @@ public class MainActivity extends Activity {
       error("Diagnóstico copiado");
     }));
   }
-  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,25);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;if(prefs.getBoolean("clean_inbox",true))layout("Correo");else menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,25);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
     boolean clean=prefs.getBoolean("clean_inbox",true);
     if(clean){
       LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
-      TextView heading=text("Recibidos · "+cache.count(lastAccount,folder),19);heading.setTypeface(null,Typeface.BOLD);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+      TextView heading=text(folderDisplayName(folder)+" · "+cache.count(lastAccount,folder),19);heading.setTypeface(null,Typeface.BOLD);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
       top.addView(button("☰",()->{
-        final String[] options={"Todos","No leídos","★ Favoritos","📎 Adjuntos","Búsqueda avanzada","Seleccionar varios","Sincronizar","Estado IMAP","Búsquedas guardadas"};
+        final String[] options={"Todos","No leídos","★ Favoritos","📎 Adjuntos","Búsqueda avanzada","Seleccionar varios","Sincronizar","Estado IMAP","Búsquedas guardadas","25 anteriores","25 siguientes","Carpetas","Bandeja","Redactar","Cuenta y ajustes"};
         new AlertDialog.Builder(this).setTitle("Bandeja · Opciones").setItems(options,(dialog,which)->{
           if(which<4){inboxFilter=which;renderCached(folder);}else if(which==4)advancedSearchScreen(folder);
           else if(which==5){selectionMode=true;selectedUids.clear();renderCached(folder);}
           else if(which==6){if(configured)openFolder(folder);else settings();}
-          else if(which==7)syncDiagnostics();else showSavedSearches(folder);
+          else if(which==7)syncDiagnostics();else if(which==8)showSavedSearches(folder);
+          else if(which==9){pageOffset=Math.max(0,pageOffset-25);renderCached(folder);}
+          else if(which==10){if(pageOffset+25<cache.count(lastAccount,folder)){pageOffset+=25;renderCached(folder);}}
+          else if(which==11)folders();else if(which==12)openFolder("INBOX");
+          else if(which==13)compose("","","");else if(which==14)settings();
         }).show();
       }));
       content.addView(top);
@@ -540,7 +550,6 @@ public class MainActivity extends Activity {
     if(!clean)for(String savedTerm:savedTerms){content.addView(button("🔎 "+savedTerm,()->search.setText(savedTerm)));}
     Button clearSearches=button("🗑 Borrar búsquedas guardadas",()->{prefs.edit().remove("saved_searches_"+lastAccount).apply();renderCached(folder);});if(!clean)content.addView(clearSearches);
     renderSearch(results,folder,"");if(!clean)content.addView(button("🔎 Búsqueda avanzada",()->advancedSearchScreen(folder)));if(!clean)content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));if(!clean)content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));
-    if(clean){LinearLayout paging=new LinearLayout(this);paging.setOrientation(LinearLayout.HORIZONTAL);paging.addView(button("‹ Anteriores",()->{pageOffset=Math.max(0,pageOffset-25);renderCached(folder);}),new LinearLayout.LayoutParams(0,-2,1));paging.addView(button("Siguientes ›",()->{if(pageOffset+25<cache.count(lastAccount,folder)){pageOffset+=25;renderCached(folder);}}),new LinearLayout.LayoutParams(0,-2,1));content.addView(paging);}
     if(!clean)content.addView(button("← 25 anteriores",()->{pageOffset=Math.max(0,pageOffset-25);renderCached(folder);}));
     if(!clean)content.addView(button("25 siguientes →",()->{if(pageOffset+25<cache.count(lastAccount,folder)){pageOffset+=25;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
   boolean isFavorite(String folder,long uid){

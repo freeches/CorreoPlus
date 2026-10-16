@@ -13,3 +13,8 @@ Nota: el historial remoto anterior al contenido de la caché no se importa autom
 - Evita bloquear el hilo principal al cerrar conexiones IMAP IDLE durante pausas y cambios de pantalla.
 - Evita iniciar simultáneamente más de un observador IDLE en la misma actividad.
 - Conserva la comprobación de lectura de todos los mensajes locales.
+
+
+## V2.0.17 Beta
+- Encabezado de carpeta dinámico, sin duplicación de Recibidos.
+- Ocultos botones inferiores de paginación en modo despejado; navegación disponible en menú de opciones.

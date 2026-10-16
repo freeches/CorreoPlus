@@ -388,41 +388,40 @@ public class MainActivity extends Activity {
         f.open(Folder.READ_ONLY);
         int n=f.getMessageCount();
         long validity=f instanceof IMAPFolder?((IMAPFolder)f).getUIDValidity():0;
-        int cachedCount=cache.count(lastAccount,folder);
-        int window=Math.min(n,Math.max(50,cachedCount+50));
-        int lower=Math.max(0,n-window);
+        // Load only the newest 25 headers; reconcile read flags for every cached UID.
+        int lower=Math.max(0,n-25);
         ArrayList<MailCache.Item> batch=new ArrayList<>();
-        int processed=0, added=0, updated=0;
+        int processed=0,added=0,updated=0;
         syncStatus(folder,"Conectado · "+n+" mensajes en servidor");
         for(int i=n;i>lower;i--){
           Message m=f.getMessage(i);
           long uid=f instanceof IMAPFolder?((IMAPFolder)f).getUID(m):i;
           if(uid<=0)continue;
           MailCache.Item existing=cache.get(lastAccount,folder,uid);
-          if(existing!=null){
-            // Refresh remote read/unread state for the visible window.
-            cache.updateSeen(lastAccount,folder,validity,uid,m.isSet(Flags.Flag.SEEN));
-            updated++;
-          }else{
-            boolean seen=m.isSet(Flags.Flag.SEEN);
-            Date d=m.getSentDate();
-            batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),
-                d==null?"":d.toString(),seen,null,-1));
-            added++;
-          }
+          if(existing==null){Date d=m.getSentDate();batch.add(new MailCache.Item(uid,sender(m),decode(m.getSubject()),d==null?"":d.toString(),m.isSet(Flags.Flag.SEEN),null,-1));added++;}
           processed++;
-          if(batch.size()>=10){cache.saveHeaders(lastAccount,folder,validity,batch);batch.clear();}
-          if(processed%10==0){
-            String progress="Procesados "+processed+"/"+(n-lower)+" · nuevos "+added+" · estados "+updated;
-            syncStatus(folder,progress);
-            final String display=progress;
-            show(()->{if(folder.equals(folderName)){
-              // Do not rebuild the whole list on each message.
-              if(syncProgressLabel!=null)syncProgressLabel.setText(display);
-            }});
-          }
         }
         if(!batch.isEmpty())cache.saveHeaders(lastAccount,folder,validity,batch);
+        if(f instanceof IMAPFolder){
+          IMAPFolder imap=(IMAPFolder)f;
+          int offset=0;
+          while(true){
+            ArrayList<MailCache.Item> local=cache.page(lastAccount,folder,offset,100);
+            if(local.isEmpty())break;
+            long[] ids=new long[local.size()];for(int j=0;j<ids.length;j++)ids[j]=local.get(j).uid;
+            Message[] remote=imap.getMessagesByUID(ids);
+            if(remote==null||remote.length!=ids.length)throw new Exception("Respuesta IMAP incompleta");
+            for(int j=0;j<remote.length;j++){
+              if(remote[j]!=null&&!remote[j].isExpunged()){
+                boolean seen=remote[j].isSet(Flags.Flag.SEEN);
+                if(local.get(j).seen!=seen){cache.updateSeen(lastAccount,folder,validity,ids[j],seen);updated++;}
+              }
+            }
+            offset+=local.size();
+            syncStatus(folder,"Estados verificados: "+offset+" · nuevos "+added);
+            if(local.size()<100)break;
+          }
+        }
         prefs.edit().putLong("synced_"+lastAccount+"_"+folder,System.currentTimeMillis()).apply();
         syncStatus(folder,"Completado · "+added+" nuevos, "+updated+" actualizados");
       }finally{try{if(f.isOpen())f.close(false);}catch(Exception ignored){}}
@@ -494,7 +493,7 @@ public class MainActivity extends Activity {
       error("Diagnóstico copiado");
     }));
   }
-  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,100);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,25);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
     boolean clean=prefs.getBoolean("clean_inbox",true);
     if(clean){
       LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -541,9 +540,9 @@ public class MainActivity extends Activity {
     if(!clean)for(String savedTerm:savedTerms){content.addView(button("🔎 "+savedTerm,()->search.setText(savedTerm)));}
     Button clearSearches=button("🗑 Borrar búsquedas guardadas",()->{prefs.edit().remove("saved_searches_"+lastAccount).apply();renderCached(folder);});if(!clean)content.addView(clearSearches);
     renderSearch(results,folder,"");if(!clean)content.addView(button("🔎 Búsqueda avanzada",()->advancedSearchScreen(folder)));if(!clean)content.addView(button("☑ Seleccionar varios",()->{selectionMode=true;selectedUids.clear();renderSearch(results,folder,search.getText().toString());}));if(!clean)content.addView(button("↻ Sincronizar",()->{if(configured)openFolder(folder);else settings();}));
-    if(clean){LinearLayout paging=new LinearLayout(this);paging.setOrientation(LinearLayout.HORIZONTAL);paging.addView(button("‹ Anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}),new LinearLayout.LayoutParams(0,-2,1));paging.addView(button("Siguientes ›",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}),new LinearLayout.LayoutParams(0,-2,1));content.addView(paging);}
-    if(!clean)content.addView(button("← 100 anteriores",()->{pageOffset=Math.max(0,pageOffset-100);renderCached(folder);}));
-    if(!clean)content.addView(button("100 siguientes →",()->{if(pageOffset+100<cache.count(lastAccount,folder)){pageOffset+=100;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
+    if(clean){LinearLayout paging=new LinearLayout(this);paging.setOrientation(LinearLayout.HORIZONTAL);paging.addView(button("‹ Anteriores",()->{pageOffset=Math.max(0,pageOffset-25);renderCached(folder);}),new LinearLayout.LayoutParams(0,-2,1));paging.addView(button("Siguientes ›",()->{if(pageOffset+25<cache.count(lastAccount,folder)){pageOffset+=25;renderCached(folder);}}),new LinearLayout.LayoutParams(0,-2,1));content.addView(paging);}
+    if(!clean)content.addView(button("← 25 anteriores",()->{pageOffset=Math.max(0,pageOffset-25);renderCached(folder);}));
+    if(!clean)content.addView(button("25 siguientes →",()->{if(pageOffset+25<cache.count(lastAccount,folder)){pageOffset+=25;renderCached(folder);}}));/* legacy listing removed */for(MailCache.Item r:new ArrayList<MailCache.Item>()){TextView item=text((r.seen?"":"● ")+r.from+"\n"+r.subject+"\n"+r.date,15);item.setBackgroundColor(darkMode?Color.rgb(45,55,69):Color.rgb(245,248,252));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;content.addView(item,lp);item.setOnClickListener(v->openCachedMessage(folder,r.uid));}}
   boolean isFavorite(String folder,long uid){
     return prefs.getBoolean("fav_"+lastAccount+"_"+folder+"_"+uid,false);
   }
@@ -574,7 +573,7 @@ public class MainActivity extends Activity {
   }
   void renderSearch(LinearLayout target,String folder,String query){
     target.removeAllViews();
-    ArrayList<MailCache.Item> rows=query.trim().isEmpty()?cache.page(lastAccount,folder,pageOffset,100):cache.search(lastAccount,folder,query);
+    ArrayList<MailCache.Item> rows=query.trim().isEmpty()?cache.page(lastAccount,folder,pageOffset,25):cache.search(lastAccount,folder,query);
     if(selectionMode){
       LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.VERTICAL);target.addView(actions);
       actions.addView(text(selectedUids.size()+" seleccionados",17));
@@ -1340,7 +1339,7 @@ public class MainActivity extends Activity {
       }catch(Exception ignored){}
       if(selected==null)for(String name:preferred){if(name.startsWith("\\"))continue;Folder candidate=st.getFolder(name);if(candidate.exists()){selected=name;break;}}
       if(selected==null){selected="Sent";Folder candidate=st.getFolder(selected);if(!candidate.exists()&&!candidate.create(Folder.HOLDS_MESSAGES))throw new Exception("No existe carpeta Enviados");}
-      f=st.getFolder(selected);f.open(Folder.READ_WRITE);f.appendMessages(new Message[]{sent});return true;
+      f=st.getFolder(selected);f.open(Folder.READ_WRITE);sent.setFlag(Flags.Flag.SEEN,true);sent.saveChanges();f.appendMessages(new Message[]{sent});return true;
     }finally{if(f!=null&&f.isOpen())f.close(false);if(st!=null&&st.isConnected())st.close();}
   }
   @Override public void onBackPressed(){renderCached(folderName);}

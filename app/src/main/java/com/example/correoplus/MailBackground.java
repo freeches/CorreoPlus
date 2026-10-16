@@ -91,7 +91,7 @@ public final class MailBackground extends Worker {
       // UID ranges avoid scanning the same 100 headers on every poll.
       // A small recent window still reconciles read/unread changes made elsewhere.
       Message[] newMessages=previous>0?imap.getMessagesByUID(previous+1,UIDFolder.LASTUID):new Message[0];
-      int recentStart=Math.max(1,total-99);
+      int recentStart=Math.max(1,total-24);
       java.util.LinkedHashMap<Long,Message> candidates=new java.util.LinkedHashMap<>();
       for(int i=recentStart;i<=total;i++){Message m=folder.getMessage(i);long id=imap.getUID(m);if(id>0)candidates.put(id,m);}
       if(newMessages!=null)for(Message m:newMessages){if(m!=null){long id=imap.getUID(m);if(id>0)candidates.put(id,m);}}
@@ -112,22 +112,26 @@ public final class MailBackground extends Worker {
         }else {if(existing.seen!=m.isSet(Flags.Flag.SEEN))updated++;cache.updateSeen(account,"INBOX",validity,uid,m.isSet(Flags.Flag.SEEN));}
       }
       cache.saveHeaders(account,"INBOX",validity,batch);
-      // Reconcile remote expunges for the locally cached window using stable IMAP UIDs.
-      // Never delete cached messages on a failed lookup: any server error retries the worker.
-      int removed=0;
-      ArrayList<MailCache.Item> cached=cache.page(account,"INBOX",0,100);
-      if(!cached.isEmpty()){
-        long[] knownUids=new long[cached.size()];
-        for(int i=0;i<cached.size();i++)knownUids[i]=cached.get(i).uid;
-        Message[] remote=imap.getMessagesByUID(knownUids);
-        if(remote!=null&&remote.length==knownUids.length){
-          for(int i=0;i<remote.length;i++){
-            if(isStopped())return Result.retry();
-            if(remote[i]==null||remote[i].isExpunged()){
-              cache.remove(account,"INBOX",knownUids[i]);removed++;
-            }
+      // Check read/unread flags for ALL cached messages, in bounded UID batches.
+      // Missing UIDs are not deleted here: an incomplete response must not lose local mail.
+      int removed=0,checked=0,offset=0;
+      while(true){
+        ArrayList<MailCache.Item> cached=cache.page(account,"INBOX",offset,100);
+        if(cached.isEmpty())break;
+        long[] ids=new long[cached.size()];
+        for(int i=0;i<ids.length;i++)ids[i]=cached.get(i).uid;
+        Message[] remote=imap.getMessagesByUID(ids);
+        if(remote==null||remote.length!=ids.length)throw new Exception("Incomplete UID response");
+        for(int i=0;i<remote.length;i++){
+          if(isStopped())return Result.retry();
+          if(remote[i]!=null&&!remote[i].isExpunged()){
+            boolean seen=remote[i].isSet(Flags.Flag.SEEN);
+            if(cached.get(i).seen!=seen){cache.updateSeen(account,"INBOX",validity,ids[i],seen);updated++;}
           }
+          checked++;
         }
+        offset+=cached.size();
+        if(cached.size()<100)break;
       }
       p.edit().putInt("background_progress_done",workTotal).putString("background_phase","Completado").apply();
       history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados · "+removed+" eliminados · "+workTotal+" comprobados");

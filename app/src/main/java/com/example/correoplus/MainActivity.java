@@ -215,7 +215,7 @@ public class MainActivity extends Activity {
     editor.setPadding(16,16,16,16);
   }
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
-  void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));}
+  void layout(String heading){inboxVisible=false;root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));}
   @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);blue=accentColor(prefs.getInt("accent_color",0));lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
     h=prefs.getString("imap_host",""); u=prefs.getString("username","");
     sh=prefs.getString("smtp_host","");
@@ -227,7 +227,35 @@ public class MainActivity extends Activity {
     openNotificationIntent(getIntent());
     if(configured) openFolder("INBOX");
   }}
-  @Override protected void onResume(){super.onResume();if(prefs!=null&&prefs.getBoolean("background_sync",false)&&idleWatcher==null){idleWatcher=new ImapIdleWatcher(this);idleWatcher.start();}}
+  boolean inboxVisible=false;
+  long lastDisplayedSync=0;
+  final android.content.BroadcastReceiver cacheUpdatedReceiver=new android.content.BroadcastReceiver(){
+    @Override public void onReceive(android.content.Context context,android.content.Intent intent){
+      if(intent==null||!lastAccount.equals(intent.getStringExtra("account")))return;
+      String changed=intent.getStringExtra("folder");
+      if(changed!=null&&changed.equals(folderName))refreshInboxIfChanged();
+    }
+  };
+  void refreshInboxIfChanged(){
+    if(!inboxVisible||content==null||root==null)return;
+    long latest=prefs.getLong("synced_"+lastAccount+"_"+folderName,0);
+    if(latest<=lastDisplayedSync)return;
+    int scrollY=0;
+    if(root.getChildCount()>1&&root.getChildAt(1) instanceof ScrollView)
+      scrollY=((ScrollView)root.getChildAt(1)).getScrollY();
+    String current=folderName;
+    renderCached(current);
+    final int restore=scrollY;
+    if(root.getChildCount()>1&&root.getChildAt(1) instanceof ScrollView)
+      root.getChildAt(1).post(()->((ScrollView)root.getChildAt(1)).scrollTo(0,restore));
+  }
+  @Override protected void onStart(){super.onStart();
+    android.content.IntentFilter filter=new android.content.IntentFilter("com.example.correoplus.CACHE_UPDATED");
+    if(android.os.Build.VERSION.SDK_INT>=33)registerReceiver(cacheUpdatedReceiver,filter,android.content.Context.RECEIVER_NOT_EXPORTED);
+    else registerReceiver(cacheUpdatedReceiver,filter);
+  }
+  @Override protected void onStop(){try{unregisterReceiver(cacheUpdatedReceiver);}catch(Exception ignored){}super.onStop();}
+  @Override protected void onResume(){super.onResume();if(prefs!=null&&prefs.getBoolean("background_sync",false)&&idleWatcher==null){idleWatcher=new ImapIdleWatcher(this);idleWatcher.start();}refreshInboxIfChanged();}
   @Override protected void onPause(){if(idleWatcher!=null){idleWatcher.stop();idleWatcher=null;}super.onPause();}
   @Override protected void onNewIntent(Intent intent){
     super.onNewIntent(intent);setIntent(intent);openNotificationIntent(intent);
@@ -499,7 +527,7 @@ public class MainActivity extends Activity {
       error("Diagnóstico copiado");
     }));
   }
-  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;if(prefs.getBoolean("clean_inbox",true))layout("Correo");else menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,25);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;if(prefs.getBoolean("clean_inbox",true))layout("Correo");else menu();inboxVisible=true;lastDisplayedSync=prefs.getLong("synced_"+lastAccount+"_"+folder,0);ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,25);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
     boolean clean=prefs.getBoolean("clean_inbox",true);
     if(clean){
       LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(android.view.Gravity.CENTER_VERTICAL);

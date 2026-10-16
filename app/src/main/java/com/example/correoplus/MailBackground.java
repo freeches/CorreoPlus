@@ -137,6 +137,11 @@ public final class MailBackground extends Worker {
       history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados · "+removed+" eliminados · "+workTotal+" comprobados");
       p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+updated+" estados actualizados · "+removed+" eliminados · "+workTotal+" comprobados").putLong("background_last_success",System.currentTimeMillis()).apply();
       p.edit().putLong("synced_"+account+"_INBOX",System.currentTimeMillis()).apply();
+      Intent changed=new Intent("com.example.correoplus.CACHE_UPDATED");
+      changed.setPackage(ctx.getPackageName());
+      changed.putExtra("account",account);
+      changed.putExtra("folder","INBOX");
+      ctx.sendBroadcast(changed);
       if(fresh>0)notifyNew(ctx,fresh,latestFrom,latestSubject,latestUid,account);
       return Result.success();
     }catch(Exception ex){

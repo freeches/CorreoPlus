@@ -18,3 +18,7 @@ Nota: el historial remoto anterior al contenido de la caché no se importa autom
 ## V2.0.17 Beta
 - Encabezado de carpeta dinámico, sin duplicación de Recibidos.
 - Ocultos botones inferiores de paginación en modo despejado; navegación disponible en menú de opciones.
+
+
+## V2.0.18 Beta
+La bandeja abierta se refresca automáticamente tras sincronizar WorkManager, conservando su desplazamiento; al volver a la aplicación comprueba si la caché cambió. No interrumpe la lectura de un mensaje.

@@ -227,7 +227,7 @@ public class MainActivity extends Activity {
     openNotificationIntent(getIntent());
     if(configured) openFolder("INBOX");
   }}
-  @Override protected void onResume(){super.onResume();if(prefs!=null&&prefs.getBoolean("background_sync",false)){idleWatcher=new ImapIdleWatcher(this);idleWatcher.start();}}
+  @Override protected void onResume(){super.onResume();if(prefs!=null&&prefs.getBoolean("background_sync",false)&&idleWatcher==null){idleWatcher=new ImapIdleWatcher(this);idleWatcher.start();}}
   @Override protected void onPause(){if(idleWatcher!=null){idleWatcher.stop();idleWatcher=null;}super.onPause();}
   @Override protected void onNewIntent(Intent intent){
     super.onNewIntent(intent);setIntent(intent);openNotificationIntent(intent);

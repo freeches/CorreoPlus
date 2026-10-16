@@ -19,7 +19,17 @@ final class ImapIdleWatcher {
   private Thread thread;
   ImapIdleWatcher(Context ctx){context=ctx.getApplicationContext();}
   void start(){if(running)return;running=true;thread=new Thread(this::loop,"CorreoPlus-IMAP-IDLE");thread.start();}
-  void stop(){running=false;try{if(folder!=null&&folder.isOpen())folder.close(false);}catch(Exception ignored){}try{if(store!=null)store.close();}catch(Exception ignored){}if(thread!=null)thread.interrupt();}
+  void stop(){
+    running=false;
+    // Closing IMAP sockets may block for a network timeout. Never do it on Android's UI thread.
+    final IMAPFolder closingFolder=folder;
+    final Store closingStore=store;
+    if(thread!=null)thread.interrupt();
+    new Thread(()->{
+      try{if(closingFolder!=null&&closingFolder.isOpen())closingFolder.close(false);}catch(Exception ignored){}
+      try{if(closingStore!=null)closingStore.close();}catch(Exception ignored){}
+    },"CorreoPlus-IDLE-stop").start();
+  }
   private void loop(){int delay=2000;
     while(running){try{
       SharedPreferences p=context.getSharedPreferences("correoplus_settings",Context.MODE_PRIVATE);

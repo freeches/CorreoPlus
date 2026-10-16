@@ -274,16 +274,33 @@ public class MainActivity extends Activity {
   Store connect()throws Exception{Session s=Session.getInstance(imapProperties());Store st=s.getStore(imapPort==993?"imaps":"imap");st.connect(h,imapPort,u,pw);return st;}
   String decode(String s){if(s==null)return "(sin asunto)";try{return MimeUtility.decodeText(s);}catch(Exception e){return s;}}
   String sender(Message m)throws Exception{Address[] a=m.getFrom();return a==null||a.length==0?"Remitente desconocido":decode(a[0].toString());}
+  // A single compact navigation row replaces the four oversized menu buttons.
   void menu(){
     layout("Correo");
-    int order=prefs.getInt("quick_order",0);
-    if(order==1)quickComposeButton();
-    if(order==2)quickInboxButton();
-    content.addView(button("☰ Carpetas",()->folders()));
-    if(order!=2)quickInboxButton();
-    if(order!=1)quickComposeButton();
-    if(prefs.getBoolean("quick_diagnostics",false))content.addView(button("📊 Diagnóstico",()->syncDiagnostics()));
-    content.addView(button("⚙ Cuenta",()->settings()));
+    LinearLayout nav=new LinearLayout(this);
+    nav.setOrientation(LinearLayout.HORIZONTAL);
+    nav.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    TextView title=text("Recibidos",18);
+    title.setTypeface(null,Typeface.BOLD);
+    nav.addView(title,new LinearLayout.LayoutParams(0,-2,1));
+    Button foldersButton=button("☰",()->{
+      ArrayList<String> actions=new ArrayList<>();
+      actions.add("Carpetas");actions.add("Bandeja");actions.add("Redactar");actions.add("Cuenta y ajustes");
+      if(prefs.getBoolean("quick_diagnostics",false))actions.add("Diagnóstico");
+      new AlertDialog.Builder(this).setTitle("CorreoPlus · Navegación")
+        .setItems(actions.toArray(new String[0]),(dialog,which)->{
+          switch(which){
+            case 0:folders();break;
+            case 1:openFolder("INBOX");break;
+            case 2:compose("","","");break;
+            case 3:settings();break;
+            case 4:syncDiagnostics();break;
+          }
+        }).show();
+    });
+    foldersButton.setContentDescription("Abrir carpetas y navegación");
+    nav.addView(foldersButton);
+    content.addView(nav);
   }
   void quickInboxButton(){if(prefs.getBoolean("quick_inbox",true))content.addView(button("📥 Bandeja",()->openFolder("INBOX")));}
   void quickComposeButton(){if(prefs.getBoolean("quick_compose",true))content.addView(button("✎ Redactar",()->compose("","","")));}
@@ -430,7 +447,7 @@ public class MainActivity extends Activity {
       error("Diagnóstico copiado");
     }));
   }
-  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,100);content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
+  void renderCached(String folder){if(!folder.equals(folderName)){selectionMode=false;selectedUids.clear();}folderName=folder;menu();ArrayList<MailCache.Item> rows=cache.page(lastAccount,folder,pageOffset,100);if(!prefs.getBoolean("clean_inbox",true))content.addView(text(folder+" · "+cache.count(lastAccount,folder)+" mensajes guardados",19));
     boolean clean=prefs.getBoolean("clean_inbox",true);
     if(clean){
       LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -866,7 +883,7 @@ public class MainActivity extends Activity {
     // No overlay and no pixel-sized controls (which were clipped on high-density screens).
     ScrollView messageScroll=(ScrollView)root.getChildAt(1);
     boolean cleanReader=prefs.getBoolean("clean_reader",true);
-    int actionHeight=(int)((cleanReader?51:76)*getResources().getDisplayMetrics().density+0.5f);
+    int actionHeight=(int)(76*getResources().getDisplayMetrics().density+0.5f);
     if(cleanReader){LinearLayout backRow=new LinearLayout(this);backRow.setOrientation(LinearLayout.HORIZONTAL);backRow.addView(button("‹ Volver",()->renderCached(folder)),new LinearLayout.LayoutParams(0,-2,1));backRow.addView(button("⋮",()->showReaderNavigation(folder,uid)),new LinearLayout.LayoutParams(0,-2,0.5f));content.addView(backRow);}else content.addView(button("← Volver",()->renderCached(folder)));
     // Navigation uses the already cached folder ordering, without extra IMAP requests.
     ArrayList<MailCache.Item> nearby=cache.list(lastAccount,folder);
@@ -992,7 +1009,7 @@ public class MainActivity extends Activity {
     caption.setSingleLine(true);
     caption.setIncludeFontPadding(false);
     cell.addView(glyph,new LinearLayout.LayoutParams(-1,-2));
-    if(!prefs.getBoolean("clean_reader",true))cell.addView(caption,new LinearLayout.LayoutParams(-1,-2));
+    cell.addView(caption,new LinearLayout.LayoutParams(-1,-2));
     cell.setContentDescription(label);
     cell.setOnClickListener(v->action.run());
     bar.addView(cell,new LinearLayout.LayoutParams(0,-1,1));

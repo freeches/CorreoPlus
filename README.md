@@ -65,3 +65,10 @@ Compilación Android no verificada en este entorno.
 
 ## V2.0.7 Beta
 - Corregida la compilación de búsqueda avanzada: casilla local «Solo mensajes no leídos» declarada en su pantalla.
+
+
+## CorreoPlus 2.0.8 Beta
+- Menú de navegación compacto: Carpetas, Bandeja, Redactar y Cuenta accesibles desde ☰.
+- Eliminados los cuatro botones grandes de la parte superior de la bandeja.
+- Eliminada la línea redundante de mensajes guardados en la bandeja despejada.
+- Restauradas las etiquetas bajo los iconos de acciones del lector, manteniendo la lectura despejada.

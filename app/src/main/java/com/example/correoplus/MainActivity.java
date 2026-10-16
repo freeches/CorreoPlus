@@ -202,6 +202,17 @@ public class MainActivity extends Activity {
   void show(Runnable action){ui.post(action);} void error(String s){show(()->new AlertDialog.Builder(this).setTitle("CorreoPlus").setMessage(s).setPositiveButton("Aceptar",null).show());}
   TextView text(String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(foreground());t.setPadding(12,13,12,13);return t;}
   Button button(String name,Runnable run){Button b=new Button(this);b.setText(name);b.setAllCaps(false);b.setOnClickListener(v->run.run());return b;}
+  // Multi-line editor suitable for complete HTML documents, including long tables and banners.
+  void expandSignatureEditor(EditText editor){
+    editor.setSingleLine(false);
+    editor.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+    editor.setGravity(android.view.Gravity.TOP|android.view.Gravity.START);
+    editor.setMinLines(12);
+    editor.setMaxLines(20);
+    editor.setHorizontallyScrolling(false);
+    editor.setTextIsSelectable(true);
+    editor.setPadding(16,16,16,16);
+  }
   EditText input(LinearLayout target,String hint,String initial,boolean secret){EditText e=new EditText(this);e.setHint(hint);e.setSingleLine(true);e.setText(initial);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);target.addView(e);return e;}
   void layout(String heading){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(background());setContentView(root);TextView title=text("✉  CorreoPlus    "+heading,22);title.setTextColor(Color.WHITE);title.setBackgroundColor(navy);root.addView(title);ScrollView sc=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(14,12,14,12);sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));}
   @Override public void onCreate(Bundle b){super.onCreate(b); MailBackground.schedule(this);cache=new MailCache(this);prefs=getSharedPreferences("correoplus_settings",MODE_PRIVATE);darkMode=prefs.getBoolean("dark_mode",false);blue=accentColor(prefs.getInt("accent_color",0));lastAccount=prefs.getString("account","");if(lastAccount.isEmpty())settings();else {
@@ -212,8 +223,21 @@ public class MainActivity extends Activity {
     try { pw=CredentialVault.load(this,lastAccount); configured=pw!=null && !h.isEmpty() && !u.isEmpty(); }
     catch(Exception e){configured=false;pw=null;}
     renderCached("INBOX");
+    openNotificationIntent(getIntent());
     if(configured) openFolder("INBOX");
   }}
+  @Override protected void onNewIntent(Intent intent){
+    super.onNewIntent(intent);setIntent(intent);openNotificationIntent(intent);
+  }
+  void openNotificationIntent(Intent intent){
+    if(intent==null||!"com.example.correoplus.OPEN_NEW_MAIL".equals(intent.getAction()))return;
+    String account=intent.getStringExtra("notification_account");
+    if(account==null||!account.equals(lastAccount))return;
+    long uid=intent.getLongExtra("notification_uid",-1L);
+    intent.setAction(Intent.ACTION_MAIN); // Do not reopen the same message on rotation.
+    if(uid>0&&cache.get(lastAccount,"INBOX",uid)!=null)openCachedMessage("INBOX",uid);
+    else renderCached("INBOX");
+  }
   void settings(){layout("Cuentas");
   CheckBox notices=new CheckBox(this);notices.setText("Notificaciones y sincronización periódica (mínimo 15 minutos)");notices.setTextColor(foreground());notices.setChecked(prefs.getBoolean("background_sync",false));content.addView(notices);notices.setOnCheckedChangeListener((v,enabled)->{prefs.edit().putBoolean("background_sync",enabled).apply();MailBackground.schedule(this);});
   CheckBox wifiOnly=new CheckBox(this);wifiOnly.setText("Sincronizar en segundo plano solo con Wi-Fi o red sin límite de datos");wifiOnly.setTextColor(foreground());wifiOnly.setChecked(prefs.getBoolean("sync_wifi_only",false));content.addView(wifiOnly);
@@ -280,10 +304,13 @@ public class MainActivity extends Activity {
   blockTrackers.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean("block_tracking_pixels",checked).apply());
   content.addView(text("Firmas HTML: principal, respuestas y reenvíos. Se admite código HTML (enlaces, imágenes remotas y estilos).",16));
   EditText replySignature=input(content,"HTML firma para respuestas",prefs.getString("signature_reply",""),false);
+  expandSignatureEditor(replySignature);
   EditText forwardSignature=input(content,"HTML firma para reenvíos",prefs.getString("signature_forward",""),false);
+  expandSignatureEditor(forwardSignature);
   content.addView(button("Guardar firmas adicionales",()->{prefs.edit().putString("signature_reply",replySignature.getText().toString()).putString("signature_forward",forwardSignature.getText().toString()).apply();error("Firmas guardadas");}));
   content.addView(text("Firma automática (se añade al enviar)",14));
   EditText signature=input(content,"HTML firma principal",prefs.getString("signature",""),false);
+  expandSignatureEditor(signature);
   content.addView(button("Guardar firma",()->{prefs.edit().putString("signature",signature.getText().toString()).apply();error("Firma guardada");}));content.addView(text("Correo IMAP / SMTP · Conexión cifrada",17));content.addView(text("Gmail y Outlook con OAuth2 todavía no disponibles. Puedes optar por guardar la contraseña cifrada con Android Keystore. Gmail y Outlook requieren OAuth2 y todavía no están integrados.",13));host=input(content,"Servidor IMAP",prefs.getString("imap_host",""),false);port=input(content,"Puerto IMAP 993 o 143",prefs.getString("imap_port","993"),false);user=input(content,"Correo / usuario",prefs.getString("username",""),false);pass=input(content,"Contraseña IMAP", "",true);
   CheckBox remember=new CheckBox(this);remember.setText("Recordar contraseña cifrada en este dispositivo");content.addView(remember);
   content.addView(button("Borrar contraseña guardada",()->{CredentialVault.clear(this);pw=null;configured=false;error("Credenciales guardadas eliminadas");}));smtpHost=input(content,"Servidor SMTP",prefs.getString("smtp_host",""),false);smtpPort=input(content,"Puerto SMTP 465 o 587",prefs.getString("smtp_port","587"),false);content.addView(button("Conectar y abrir bandeja",()->{try{h=host.getText().toString().trim();u=user.getText().toString().trim();pw=pass.getText().toString();sh=smtpHost.getText().toString().trim();imapPort=Integer.parseInt(port.getText().toString().trim());sPort=Integer.parseInt(smtpPort.getText().toString().trim());if(h.isEmpty()||u.isEmpty()||pw.isEmpty()||!(imapPort==993||imapPort==143)||!(sPort==465||sPort==587))throw new Exception("Revisa servidor, usuario, contraseña y puertos admitidos");rememberPassword=remember.isChecked();configured=true;lastAccount=u.toLowerCase(Locale.ROOT)+"@"+h.toLowerCase(Locale.ROOT);if(rememberPassword){CredentialVault.save(this,lastAccount,pw);}else{CredentialVault.clear(this);}prefs.edit().putString("account",lastAccount).putString("imap_host",h).putString("imap_port",String.valueOf(imapPort)).putString("username",u).putString("smtp_host",sh).putString("smtp_port",String.valueOf(sPort)).apply();openFolder("INBOX");}catch(Exception e){error(e.getMessage());}}));}

@@ -21,6 +21,7 @@ import androidx.work.ExistingWorkPolicy;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 import androidx.work.WorkManager;
+import androidx.work.BackoffPolicy;
 import com.sun.mail.imap.IMAPFolder;
 import java.util.ArrayList;
 import java.util.Date;
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import javax.mail.Flags;
 import javax.mail.Folder;
 import javax.mail.Message;
+import javax.mail.UIDFolder;
 import javax.mail.Session;
 import javax.mail.Store;
 import javax.mail.internet.MimeUtility;
@@ -44,7 +46,7 @@ public final class MailBackground extends Worker {
     Constraints c=new Constraints.Builder()
       .setRequiredNetworkType(p.getBoolean("sync_wifi_only",false)?NetworkType.UNMETERED:NetworkType.CONNECTED)
       .setRequiresBatteryNotLow(p.getBoolean("sync_battery_guard",true)).build();
-    PeriodicWorkRequest req=new PeriodicWorkRequest.Builder(MailBackground.class,15,TimeUnit.MINUTES).setConstraints(c).build();
+    PeriodicWorkRequest req=new PeriodicWorkRequest.Builder(MailBackground.class,15,TimeUnit.MINUTES).setConstraints(c).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build();
     manager.enqueueUniquePeriodicWork("correo_background",ExistingPeriodicWorkPolicy.UPDATE,req);
   }
   public static void syncNow(Context context){
@@ -53,7 +55,7 @@ public final class MailBackground extends Worker {
       .setRequiredNetworkType(p.getBoolean("sync_wifi_only",false)?NetworkType.UNMETERED:NetworkType.CONNECTED)
       .setRequiresBatteryNotLow(p.getBoolean("sync_battery_guard",true)).build();
     WorkManager.getInstance(context).enqueueUniqueWork("correo_manual_background",ExistingWorkPolicy.KEEP,
-      new OneTimeWorkRequest.Builder(MailBackground.class).addTag("manual").setConstraints(c).build());
+      new OneTimeWorkRequest.Builder(MailBackground.class).addTag("manual").setConstraints(c).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build());
   }
   private static void history(SharedPreferences p,String entry){
     String old=p.getString("background_history","");
@@ -86,26 +88,52 @@ public final class MailBackground extends Worker {
       IMAPFolder imap=(IMAPFolder)folder;long validity=imap.getUIDValidity();
       MailCache cache=new MailCache(ctx);long previous=cache.maxUid(account,"INBOX",validity);
       int total=folder.getMessageCount();ArrayList<MailCache.Item> batch=new ArrayList<>();
-      p.edit().putInt("background_progress_total",Math.min(total,100)).putInt("background_progress_done",0).putString("background_phase","Leyendo encabezados").apply();
-      long newest=previous;String latestFrom="",latestSubject="";int fresh=0,updated=0;
-      for(int i=total;i>Math.max(0,total-100);i--){
+      // UID ranges avoid scanning the same 100 headers on every poll.
+      // A small recent window still reconciles read/unread changes made elsewhere.
+      Message[] newMessages=previous>0?imap.getMessagesByUID(previous+1,UIDFolder.LASTUID):new Message[0];
+      int recentStart=Math.max(1,total-99);
+      java.util.LinkedHashMap<Long,Message> candidates=new java.util.LinkedHashMap<>();
+      for(int i=recentStart;i<=total;i++){Message m=folder.getMessage(i);long id=imap.getUID(m);if(id>0)candidates.put(id,m);}
+      if(newMessages!=null)for(Message m:newMessages){if(m!=null){long id=imap.getUID(m);if(id>0)candidates.put(id,m);}}
+      int workTotal=candidates.size();
+      p.edit().putInt("background_progress_total",workTotal).putInt("background_progress_done",0).putString("background_phase","Leyendo encabezados").apply();
+      long newest=previous,latestUid=-1;String latestFrom="",latestSubject="";int fresh=0,updated=0;
+      int processed=0;
+      for(Message m:candidates.values()){
         if(isStopped())return Result.retry();
-        if((total-i)%10==0)p.edit().putInt("background_progress_done",total-i).apply();
-        Message m=folder.getMessage(i);long uid=imap.getUID(m);if(uid<=0)continue;
+        if(processed++%10==0)p.edit().putInt("background_progress_done",processed).apply();
+        long uid=imap.getUID(m);if(uid<=0)continue;
         MailCache.Item existing=cache.get(account,"INBOX",uid);
         if(existing==null){Date date=m.getSentDate();String from=m.getFrom()==null||m.getFrom().length==0?"Remitente":MimeUtility.decodeText(m.getFrom()[0].toString());
           String subject=m.getSubject()==null?"(sin asunto)":MimeUtility.decodeText(m.getSubject());
           batch.add(new MailCache.Item(uid,from,subject,date==null?"":date.toString(),m.isSet(Flags.Flag.SEEN),null,-1));
-          if(uid>newest){newest=uid;latestFrom=from;latestSubject=subject;}
+          if(uid>newest){newest=uid;latestUid=uid;latestFrom=from;latestSubject=subject;}
           if(previous>0&&uid>previous&&!m.isSet(Flags.Flag.SEEN))fresh++;
         }else {if(existing.seen!=m.isSet(Flags.Flag.SEEN))updated++;cache.updateSeen(account,"INBOX",validity,uid,m.isSet(Flags.Flag.SEEN));}
       }
       cache.saveHeaders(account,"INBOX",validity,batch);
-      p.edit().putInt("background_progress_done",Math.min(total,100)).putString("background_phase","Completado").apply();
-      history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados");
-      p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+updated+" estados actualizados").putLong("background_last_success",System.currentTimeMillis()).apply();
+      // Reconcile remote expunges for the locally cached window using stable IMAP UIDs.
+      // Never delete cached messages on a failed lookup: any server error retries the worker.
+      int removed=0;
+      ArrayList<MailCache.Item> cached=cache.page(account,"INBOX",0,100);
+      if(!cached.isEmpty()){
+        long[] knownUids=new long[cached.size()];
+        for(int i=0;i<cached.size();i++)knownUids[i]=cached.get(i).uid;
+        Message[] remote=imap.getMessagesByUID(knownUids);
+        if(remote!=null&&remote.length==knownUids.length){
+          for(int i=0;i<remote.length;i++){
+            if(isStopped())return Result.retry();
+            if(remote[i]==null||remote[i].isExpunged()){
+              cache.remove(account,"INBOX",knownUids[i]);removed++;
+            }
+          }
+        }
+      }
+      p.edit().putInt("background_progress_done",workTotal).putString("background_phase","Completado").apply();
+      history(p,"Correcto · "+batch.size()+" nuevos · "+updated+" actualizados · "+removed+" eliminados · "+workTotal+" comprobados");
+      p.edit().putString("background_last_status","Correcto · "+total+" en servidor · "+batch.size()+" nuevos · "+updated+" estados actualizados · "+removed+" eliminados · "+workTotal+" comprobados").putLong("background_last_success",System.currentTimeMillis()).apply();
       p.edit().putLong("synced_"+account+"_INBOX",System.currentTimeMillis()).apply();
-      if(fresh>0)notifyNew(ctx,fresh,latestFrom,latestSubject);
+      if(fresh>0)notifyNew(ctx,fresh,latestFrom,latestSubject,latestUid,account);
       return Result.success();
     }catch(Exception ex){
       // Never persist exception messages: servers may include private data.
@@ -115,14 +143,30 @@ public final class MailBackground extends Worker {
     }
     finally{try{if(folder!=null&&folder.isOpen())folder.close(false);}catch(Exception ignored){}try{if(store!=null&&store.isConnected())store.close();}catch(Exception ignored){}RUNNING.set(false);}
   }
-  private void notifyNew(Context ctx,int count,String from,String subject){
+  private void notifyNew(Context ctx,int count,String from,String subject,long uid,String account){
     NotificationManager manager=(NotificationManager)ctx.getSystemService(Context.NOTIFICATION_SERVICE);
-    if(Build.VERSION.SDK_INT>=26)manager.createNotificationChannel(new NotificationChannel("new_mail","Correo nuevo",NotificationManager.IMPORTANCE_DEFAULT));
+    if(manager==null)return;
+    if(Build.VERSION.SDK_INT>=26){
+      NotificationChannel channel=new NotificationChannel("new_mail","Correos nuevos",NotificationManager.IMPORTANCE_DEFAULT);
+      channel.setDescription("Avisos de mensajes nuevos recibidos en CorreoPlus");
+      manager.createNotificationChannel(channel);
+    }
     if(Build.VERSION.SDK_INT>=33&&ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return;
-    Intent intent=new Intent(ctx,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(ctx,0,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-    Notification n=new Notification.Builder(ctx,"new_mail").setSmallIcon(android.R.drawable.ic_dialog_email)
-      .setContentTitle(count==1?"Correo nuevo":"Correos nuevos: "+count)
-      .setContentText(count==1?from+" · "+subject:"Abre CorreoPlus para leerlos")
-      .setAutoCancel(true).setContentIntent(pending).build();manager.notify(903,count==1?n:n);
+    Intent intent=new Intent(ctx,MainActivity.class);
+    intent.setAction("com.example.correoplus.OPEN_NEW_MAIL");
+    intent.putExtra("notification_account",account);
+    intent.putExtra("notification_folder","INBOX");
+    intent.putExtra("notification_uid",count==1?uid:-1L);
+    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+    PendingIntent pending=PendingIntent.getActivity(ctx,903,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+    String heading=count==1?from:"Correos nuevos: "+count;
+    String detail=count==1?subject:"Toca para ver los mensajes nuevos";
+    Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(ctx,"new_mail"):new Notification.Builder(ctx);
+    Notification n=builder.setSmallIcon(android.R.drawable.ic_dialog_email)
+      .setContentTitle(heading).setContentText(detail)
+      .setStyle(new Notification.BigTextStyle().bigText(count==1?from+"\n"+subject:detail))
+      .setNumber(count).setWhen(System.currentTimeMillis()).setShowWhen(true)
+      .setAutoCancel(true).setContentIntent(pending).build();
+    manager.notify(903,n);
   }
 }

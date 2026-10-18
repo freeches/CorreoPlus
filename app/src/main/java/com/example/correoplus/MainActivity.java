@@ -820,7 +820,30 @@ public class MainActivity extends Activity {
           view.getSettings().setLoadWithOverviewMode(true);
           view.getSettings().setBuiltInZoomControls(true);
           view.getSettings().setDisplayZoomControls(false);
+          // The HTML and message header share ONE vertical scroller.
+          // Grow the WebView to its document height, allowing the outer ScrollView
+          // to move the subject, recipients and HTML together.
+          view.getSettings().setDefaultTextEncodingName("UTF-8");
+          view.setVerticalScrollBarEnabled(false);
+          view.setNestedScrollingEnabled(false);
+          final int initialHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.55f);
+          final int maxHtmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*24f);
+          final android.os.Handler sizeHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+          final Runnable[] resize=new Runnable[1];
+          resize[0]=()->{
+            if(view.getParent()!=slot)return;
+            int measured=(int)Math.ceil(view.getContentHeight()*view.getScale());
+            if(measured<=0)return;
+            int desired=Math.max(1,Math.min(measured+8,maxHtmlHeight));
+            android.view.ViewGroup.LayoutParams params=view.getLayoutParams();
+            if(params.height!=desired){params.height=desired;view.setLayoutParams(params);}
+          };
           view.setWebViewClient(new WebViewClient(){
+            @Override public void onPageFinished(WebView v,String url){
+              sizeHandler.postDelayed(resize[0],120);
+              sizeHandler.postDelayed(resize[0],650);
+              sizeHandler.postDelayed(resize[0],1800);
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest req){
               if(!req.isForMainFrame()||!req.hasGesture())return true;
               String scheme=req.getUrl().getScheme();
@@ -835,47 +858,15 @@ public class MainActivity extends Activity {
               return blockedRemoteResource();
             }
           });
-          // A fixed-height WebView scrolls its own HTML document. Do not resize it
-          // to document height: long quoted threads otherwise get cut off.
-          view.getSettings().setDefaultTextEncodingName("UTF-8");
-          view.setVerticalScrollBarEnabled(true);
-          view.setNestedScrollingEnabled(true);
-          view.setOnTouchListener((v,event)->{
-            if(event.getActionMasked()==android.view.MotionEvent.ACTION_DOWN ||
-               event.getActionMasked()==android.view.MotionEvent.ACTION_MOVE){
-              // Explicitly prevent the parent message scroller from stealing
-              // vertical gestures intended for the HTML document.
-              android.view.ViewParent parent=v.getParent();
-              while(parent!=null){parent.requestDisallowInterceptTouchEvent(true);parent=parent.getParent();}
-            }else if(event.getActionMasked()==android.view.MotionEvent.ACTION_UP ||
-                     event.getActionMasked()==android.view.MotionEvent.ACTION_CANCEL){
-              android.view.ViewParent parent=v.getParent();
-              while(parent!=null){parent.requestDisallowInterceptTouchEvent(false);parent=parent.getParent();}
-            }
-            return false;
-          });
-          // Keep the WebView scroll independent of the outer message ScrollView.
-          // The HTML has its own scrollable viewport, plus explicit navigation
-          // buttons so long newsletters and quoted conversations always reach the end.
-          int htmlHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.52f);
-          slot.addView(view,new LinearLayout.LayoutParams(-1,Math.max(htmlHeight,300)));
-          LinearLayout htmlNavigation=new LinearLayout(this);
-          htmlNavigation.setOrientation(LinearLayout.HORIZONTAL);
-          Button htmlTop=button("↑ Inicio HTML",()->view.post(()->view.pageUp(true)));
-          Button htmlBottom=button("↓ Final HTML",()->view.post(()->{
-            int bottom=Math.max(0,(int)(view.getContentHeight()*view.getScale())-view.getHeight());
-            view.scrollTo(0,bottom);
-          }));
-          htmlNavigation.addView(htmlTop,new LinearLayout.LayoutParams(0,-2,1));
-          htmlNavigation.addView(htmlBottom,new LinearLayout.LayoutParams(0,-2,1));
-          slot.addView(htmlNavigation,new LinearLayout.LayoutParams(-1,-2));
+          slot.addView(view,new LinearLayout.LayoutParams(-1,initialHeight));
+          // No separate HTML navigation buttons: the whole message scrolls naturally.
           // Reserve a visible gap after HTML so the fixed action bar never masks its end.
           View bottomGap=new View(this);
           slot.addView(bottomGap,new LinearLayout.LayoutParams(-1,(int)(24*getResources().getDisplayMetrics().density)));
           String viewport="<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
           // Scale wide email layouts to the phone while retaining readable tables.
           String responsive="<style>html,body{max-width:100%!important;overflow-wrap:anywhere;word-wrap:break-word;}"+
-            "body{padding-bottom:96px!important;box-sizing:border-box!important;}"+
+            "body{padding-bottom:24px!important;box-sizing:border-box!important;}"+
             "img,video,iframe{max-width:100%!important;height:auto!important;}"+
             "table{max-width:100%!important;}pre{white-space:pre-wrap;overflow-wrap:anywhere;}"+
             "</style>";
